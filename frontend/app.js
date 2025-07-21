@@ -12,6 +12,14 @@ class BridgeSpeakApp {
         this.isVideoEnabled = true;
         this.isAudioEnabled = true;
         
+        // WebRTC Configuration with STUN servers
+        this.rtcConfiguration = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
+        
         // Initialize the application
         this.init();
     }
@@ -45,10 +53,22 @@ class BridgeSpeakApp {
     }
 
     checkBrowserCompatibility() {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            this.updateStatus('Browser does not support WebRTC. Please use a modern browser.', 'error');
+        const checks = {
+            getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+            rtcPeerConnection: !!(window.RTCPeerConnection || window.webkitRTCPeerConnection || window.mozRTCPeerConnection),
+            rtcSessionDescription: !!(window.RTCSessionDescription || window.webkitRTCSessionDescription || window.mozRTCSessionDescription),
+            rtcIceCandidate: !!(window.RTCIceCandidate || window.webkitRTCIceCandidate || window.mozRTCIceCandidate)
+        };
+
+        const unsupported = Object.keys(checks).filter(key => !checks[key]);
+        
+        if (unsupported.length > 0) {
+            this.updateStatus(`Browser missing WebRTC support: ${unsupported.join(', ')}. Please use a modern browser.`, 'error');
+            console.error('WebRTC compatibility check failed:', checks);
             return false;
         }
+        
+        console.log('WebRTC compatibility check passed:', checks);
         return true;
     }
 
@@ -56,23 +76,36 @@ class BridgeSpeakApp {
         try {
             this.updateStatus('Starting camera and microphone...', 'info');
             
-            // Request access to camera and microphone
-            this.localStream = await navigator.mediaDevices.getUserMedia({
-                video: true,
-                audio: true
-            });
+            // Enhanced media constraints for better quality
+            const mediaConstraints = {
+                video: {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    frameRate: { ideal: 30 }
+                },
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            };
+
+            // Request access to camera and microphone with enhanced constraints
+            this.localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+            console.log('Local media stream acquired:', this.localStream);
 
             // Display local video stream
             this.localVideo.srcObject = this.localStream;
+            this.updateStatus('Local video stream connected successfully', 'success');
+
+            // Initialize WebRTC peer connection
+            await this.initializePeerConnection();
 
             // Update UI state
             this.isCallActive = true;
             this.startCallBtn.disabled = true;
             this.endCallBtn.disabled = false;
-            this.updateStatus('Call started! Waiting for remote participant...', 'success');
-
-            // Initialize WebRTC peer connection (placeholder for now)
-            this.initializePeerConnection();
+            this.updateStatus('WebRTC connection ready! Waiting for remote participant...', 'success');
 
             // Start ASL recognition and speech processing (placeholder)
             this.startAslRecognition();
@@ -80,7 +113,17 @@ class BridgeSpeakApp {
 
         } catch (error) {
             console.error('Error starting call:', error);
-            this.updateStatus('Failed to start call. Please check camera/microphone permissions.', 'error');
+            
+            // Provide specific error messages based on error type
+            if (error.name === 'NotAllowedError') {
+                this.updateStatus('Camera/microphone access denied. Please allow permissions and try again.', 'error');
+            } else if (error.name === 'NotFoundError') {
+                this.updateStatus('No camera or microphone found. Please check your devices.', 'error');
+            } else if (error.name === 'NotReadableError') {
+                this.updateStatus('Camera/microphone is already in use by another application.', 'error');
+            } else {
+                this.updateStatus(`Failed to start call: ${error.message}`, 'error');
+            }
         }
     }
 
@@ -141,10 +184,91 @@ class BridgeSpeakApp {
         }
     }
 
-    initializePeerConnection() {
-        // Placeholder for WebRTC peer connection setup
-        // This will be implemented when we add WebRTC functionality
-        console.log('Initializing peer connection...');
+    async initializePeerConnection() {
+        try {
+            console.log('Initializing RTCPeerConnection with configuration:', this.rtcConfiguration);
+            
+            // Create RTCPeerConnection with STUN server configuration
+            this.peerConnection = new RTCPeerConnection(this.rtcConfiguration);
+            
+            // Add local stream tracks to peer connection
+            if (this.localStream) {
+                this.localStream.getTracks().forEach(track => {
+                    console.log('Adding local track to peer connection:', track.kind);
+                    this.peerConnection.addTrack(track, this.localStream);
+                });
+            }
+
+            // Set up WebRTC event handlers
+            this.setupPeerConnectionEventHandlers();
+            
+            console.log('RTCPeerConnection initialized successfully');
+            this.updateStatus('WebRTC peer connection established', 'info');
+            
+        } catch (error) {
+            console.error('Error initializing peer connection:', error);
+            this.updateStatus(`Failed to initialize WebRTC connection: ${error.message}`, 'error');
+            throw error;
+        }
+    }
+
+    setupPeerConnectionEventHandlers() {
+        // Handle ICE candidate events
+        this.peerConnection.onicecandidate = (event) => {
+            console.log('ICE candidate event:', event);
+            if (event.candidate) {
+                console.log('New ICE candidate:', event.candidate);
+                // TODO: Send candidate to remote peer via signaling server
+            } else {
+                console.log('ICE candidate gathering complete');
+            }
+        };
+
+        // Handle ICE connection state changes
+        this.peerConnection.oniceconnectionstatechange = () => {
+            console.log('ICE connection state:', this.peerConnection.iceConnectionState);
+            this.updateConnectionStatus();
+        };
+
+        // Handle peer connection state changes
+        this.peerConnection.onconnectionstatechange = () => {
+            console.log('Peer connection state:', this.peerConnection.connectionState);
+            this.updateConnectionStatus();
+        };
+
+        // Handle remote stream
+        this.peerConnection.ontrack = (event) => {
+            console.log('Remote track received:', event);
+            if (event.streams && event.streams[0]) {
+                this.remoteStream = event.streams[0];
+                this.remoteVideo.srcObject = this.remoteStream;
+                this.updateStatus('Remote video stream connected!', 'success');
+            }
+        };
+
+        // Handle negotiation needed
+        this.peerConnection.onnegotiationneeded = () => {
+            console.log('Negotiation needed');
+            // TODO: Handle offer/answer negotiation when implementing signaling
+        };
+    }
+
+    updateConnectionStatus() {
+        const iceState = this.peerConnection?.iceConnectionState || 'not-started';
+        const connectionState = this.peerConnection?.connectionState || 'not-started';
+        
+        console.log(`Connection status - ICE: ${iceState}, Peer: ${connectionState}`);
+        
+        // Update UI based on connection state
+        if (iceState === 'connected' || iceState === 'completed') {
+            this.updateStatus('WebRTC connection established successfully!', 'success');
+        } else if (iceState === 'disconnected') {
+            this.updateStatus('WebRTC connection lost, attempting to reconnect...', 'info');
+        } else if (iceState === 'failed') {
+            this.updateStatus('WebRTC connection failed', 'error');
+        } else if (iceState === 'checking') {
+            this.updateStatus('Establishing WebRTC connection...', 'info');
+        }
     }
 
     startAslRecognition() {
