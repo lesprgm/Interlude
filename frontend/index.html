@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BridgeSpeak - Real-time Communication Aid</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Asake is ass</h1>
+        </header>
+
+        <main>
+            <div class="video-container">
+                <!-- Local video stream (user's own camera) -->
+                <div class="video-wrapper local-video">
+                    <video id="localVideo" autoplay muted playsinline></video>
+                    <div class="video-label">You</div>
+                </div>
+
+                <!-- Remote video stream (other participant's camera) -->
+                <div class="video-wrapper remote-video">
+                    <video id="remoteVideo" autoplay playsinline></video>
+                    <div class="video-label">Remote Participant</div>
+                </div>
+            </div>
+
+            <!-- ASL Avatar container for sign language interpretation -->
+            <div class="asl-avatar-container">
+                <div id="aslAvatar" class="asl-avatar">
+                    <div class="avatar-placeholder">ASL Avatar will appear here</div>
+                </div>
+                <div class="avatar-label">ASL Interpreter</div>
+            </div>
+
+            <!-- Control buttons -->
+            <div class="controls">
+                <button id="startCallBtn" class="btn primary">Start Call</button>
+                <button id="endCallBtn" class="btn secondary" disabled>End Call</button>
+                <button id="toggleVideoBtn" class="btn secondary">Toggle Video</button>
+                <button id="toggleAudioBtn" class="btn secondary">Toggle Audio</button>
+            </div>
+
+            <!-- Status messages -->
+            <div id="statusMessage" class="status-message">
+                Ready to connect...
+            </div>
+
+            <!-- Communication mode indicators -->
+            <div class="communication-modes">
+                <div class="mode-indicator">
+                    <span class="mode-label">Speech → ASL:</span>
+                    <span id="speechToAslStatus" class="status">Ready</span>
+                </div>
+                <div class="mode-indicator">
+                    <span class="mode-label">ASL → Speech:</span>
+                    <span id="aslToSpeechStatus" class="status">Ready</span>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html> 
