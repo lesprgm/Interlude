@@ -43,6 +43,17 @@ class InterludeApp {
         this.connectionStatus = document.getElementById('connectionStatus');
         this.connectionText = document.getElementById('connectionText');
         this.remoteVideoPlaceholder = document.getElementById('remoteVideoPlaceholder');
+        
+        // Settings elements
+        this.settingsBtn = document.getElementById('settingsBtn');
+        this.settingsModal = document.getElementById('settingsModal');
+        this.closeSettingsBtn = document.getElementById('closeSettingsBtn');
+        this.saveSettingsBtn = document.getElementById('saveSettingsBtn');
+        this.themeToggle = document.getElementById('themeToggle');
+        this.usernameInput = document.getElementById('usernameInput');
+        this.videoQualitySelect = document.getElementById('videoQuality');
+        this.defaultMuteToggle = document.getElementById('defaultMute');
+        this.defaultVideoOffToggle = document.getElementById('defaultVideoOff');
 
         this.initializeSocket();
         this.bindEventListeners();
@@ -59,6 +70,18 @@ class InterludeApp {
         this.roomIdInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.joinRoom();
         });
+        
+        // Settings event listeners
+        this.settingsBtn.addEventListener('click', () => this.openSettings());
+        this.closeSettingsBtn.addEventListener('click', () => this.closeSettings());
+        this.saveSettingsBtn.addEventListener('click', () => this.saveSettings());
+        this.settingsModal.addEventListener('click', (e) => {
+            if (e.target === this.settingsModal) this.closeSettings();
+        });
+        this.themeToggle.addEventListener('change', () => this.toggleTheme());
+        
+        // Add event listeners for toggle switch labels/sliders to make them clickable
+        this.addToggleSwitchListeners();
     }
 
     initializeSocket() {
@@ -142,7 +165,7 @@ class InterludeApp {
 
         this.currentRoom = roomId;
         this.socket.emit('join_room', { roomId: roomId });
-        this.updateStatus(`Joining room: ${roomId}...`, 'info');
+        this.updateStatus(`Joining room: ${roomId}...`, 'info', true);
         
         // Hide room selection modal
         document.getElementById('roomSelection').style.display = 'none';
@@ -174,7 +197,7 @@ class InterludeApp {
                 throw new Error('getUserMedia is not supported by this browser. Please use Chrome, Firefox, Safari, or Edge.');
             }
 
-            this.updateStatus('Starting camera and microphone...', 'info');
+            this.updateStatus('Starting camera and microphone...', 'info', true);
             
             // Enhanced media constraints for better quality
             let mediaConstraints = {
@@ -580,20 +603,61 @@ class InterludeApp {
         this.speechToAslStatus.textContent = 'Listening for speech...';
     }
 
-    updateStatus(message, type = 'info') {
-        // Update the status message content
-        const statusContent = this.statusMessage.querySelector('.status-content span') || this.statusMessage.querySelector('span');
+    updateStatus(message, type = 'info', showSpinner = false, autoHide = true) {
+        // Enhanced status message with optional loading spinner
+        const statusContent = this.statusMessage.querySelector('.status-content');
         if (statusContent) {
-            statusContent.textContent = message;
+            // Clear existing content
+            statusContent.innerHTML = '';
+            
+            // Add spinner if requested
+            if (showSpinner || (type === 'info' && message.includes('...'))) {
+                const spinner = document.createElement('div');
+                spinner.className = `spinner ${type}`;
+                statusContent.appendChild(spinner);
+            }
+            
+            // Add message text
+            const textSpan = document.createElement('span');
+            textSpan.textContent = message;
+            statusContent.appendChild(textSpan);
+            
+            // Add loading dots for ongoing operations
+            if (message.includes('...')) {
+                textSpan.className = 'loading-dots';
+            }
         }
         
-        // Update the status message classes
+        // Update status message classes with enhanced animations
         this.statusMessage.className = `status-message ${type} show`;
         
-        // Hide the status message after 5 seconds
-        setTimeout(() => {
-            this.statusMessage.classList.remove('show');
-        }, 5000);
+        // Enhanced auto-hide behavior
+        if (autoHide) {
+            const hideDelay = type === 'error' ? 7000 : type === 'success' ? 4000 : 5000;
+            setTimeout(() => {
+                this.statusMessage.classList.remove('show');
+            }, hideDelay);
+        }
+        
+        // Update connection indicator based on message type
+        this.updateConnectionIndicator(type, message);
+    }
+    
+    updateConnectionIndicator(type, message) {
+        // Enhanced connection status indicators
+        if (message.includes('Connected to signaling server') || message.includes('WebRTC connection established')) {
+            this.connectionStatus.className = 'status-dot connected';
+            this.connectionText.textContent = 'Connected';
+        } else if (message.includes('Connecting') || message.includes('Starting') || message.includes('Getting')) {
+            this.connectionStatus.className = 'status-dot connecting';
+            this.connectionText.textContent = 'Connecting...';
+        } else if (type === 'error' && (message.includes('failed') || message.includes('error'))) {
+            this.connectionStatus.className = 'status-dot error';
+            this.connectionText.textContent = 'Connection Error';
+        } else if (message.includes('Disconnected')) {
+            this.connectionStatus.className = 'status-dot';
+            this.connectionText.textContent = 'Disconnected';
+        }
     }
 
     initializeUI() {
@@ -606,6 +670,110 @@ class InterludeApp {
         
         // Initialize modal display
         document.getElementById('roomSelection').style.display = 'flex';
+        
+        // Load saved settings
+        this.loadSettings();
+    }
+
+    addToggleSwitchListeners() {
+        // Make toggle sliders clickable for better UX
+        const toggleSwitches = document.querySelectorAll('.toggle-switch');
+        
+        toggleSwitches.forEach(toggleSwitch => {
+            const checkbox = toggleSwitch.querySelector('input[type="checkbox"]');
+            const slider = toggleSwitch.querySelector('.toggle-slider');
+            const label = toggleSwitch.querySelector('.toggle-label');
+            
+            // Make slider and label clickable
+            [slider, label].forEach(element => {
+                if (element) {
+                    element.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        checkbox.checked = !checkbox.checked;
+                        
+                        // Trigger change event manually
+                        const changeEvent = new Event('change', { bubbles: true });
+                        checkbox.dispatchEvent(changeEvent);
+                    });
+                    
+                    // Add cursor pointer
+                    element.style.cursor = 'pointer';
+                }
+            });
+        });
+    }
+
+    // Settings functionality
+    openSettings() {
+        this.settingsModal.style.display = 'flex';
+    }
+
+    closeSettings() {
+        this.settingsModal.style.display = 'none';
+    }
+
+    saveSettings() {
+        const settings = {
+            theme: this.themeToggle.checked ? 'dark' : 'light',
+            username: this.usernameInput.value || 'You',
+            videoQuality: this.videoQualitySelect.value,
+            defaultMute: this.defaultMuteToggle.checked,
+            defaultVideoOff: this.defaultVideoOffToggle.checked
+        };
+
+        // Save to localStorage
+        localStorage.setItem('interludeSettings', JSON.stringify(settings));
+        
+        // Apply settings immediately
+        this.applySettings(settings);
+        
+        // Show success message
+        this.updateStatus('Settings saved successfully!', 'success');
+        
+        // Close modal
+        this.closeSettings();
+    }
+
+    loadSettings() {
+        const savedSettings = localStorage.getItem('interludeSettings');
+        if (savedSettings) {
+            const settings = JSON.parse(savedSettings);
+            this.applySettings(settings);
+            
+            // Update form values
+            this.themeToggle.checked = settings.theme === 'dark';
+            this.usernameInput.value = settings.username || 'You';
+            this.videoQualitySelect.value = settings.videoQuality || '720p';
+            this.defaultMuteToggle.checked = settings.defaultMute || false;
+            this.defaultVideoOffToggle.checked = settings.defaultVideoOff || false;
+        }
+    }
+
+    applySettings(settings) {
+        // Apply theme
+        if (settings.theme === 'dark') {
+            document.body.classList.add('dark-theme');
+        } else {
+            document.body.classList.remove('dark-theme');
+        }
+
+        // Update video label with username
+        const videoLabel = document.querySelector('.local-video-card .video-label');
+        if (videoLabel) {
+            videoLabel.textContent = settings.username || 'You';
+        }
+
+        // Store settings for use in call initialization
+        this.userSettings = settings;
+    }
+
+    toggleTheme() {
+        const isDark = this.themeToggle.checked;
+        if (isDark) {
+            document.body.classList.add('dark-theme');
+        } else {
+            document.body.classList.remove('dark-theme');
+        }
     }
 }
 
