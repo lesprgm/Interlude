@@ -1,0 +1,290 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  genai-asl-avatar-generator-backend
+
+  SAM template for ASL Avatar Generator Backend
+
+Globals:
+  Function:
+    Tracing: Active
+    Timeout: 30
+    MemorySize: 128
+
+  Api:
+    TracingEnabled: True
+
+Resources:
+  MyAslApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Tags:
+        project: !Ref AWS::StackName
+
+  GCSTranscribeLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: transcribe_gcs/
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Architectures:
+        - x86_64
+      MemorySize: 512
+      Timeout: 300
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref AudioInputBucket
+        - S3WritePolicy:
+            BucketName: !Ref AudioInputBucket
+        - Statement:
+            Effect: Allow
+            Action:
+              - states:StartExecution
+            Resource: !GetAtt ProcessingStateMachine.Arn
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:GoogleCloudCredentials-*"
+      Environment:
+        Variables:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: "{{resolve:secretsmanager:GoogleCloudCredentials}}"
+          STATE_MACHINE_ARN: !GetAtt ProcessingStateMachine.Arn
+      Events:
+        SFInvoke:
+          Type: Api
+          Properties:
+            Path: /transcribe-gcs
+            Method: POST
+            RestApiId: !Ref MyAslApi
+
+  AudioInputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "genasl-backend-hackathon-audio-input-${AWS::AccountId}"
+      Tags:
+        - Key: project
+          Value: !Ref AWS::StackName
+    DeletionPolicy: Delete
+
+  OutputVideoBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "genasl-backend-hackathon-output-video-${AWS::AccountId}"
+      Tags:
+        - Key: project
+          Value: !Ref AWS::StackName
+    DeletionPolicy: Delete
+
+  ProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-processing-queue"
+      Tags:
+        - Key: project
+          Value: !Ref AWS::StackName
+
+  ProcessingStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub "${AWS::StackName}-ProcessingStateMachine"
+      DefinitionString:
+        Fn::Sub:
+          - |
+            {
+              "Comment": "A state machine that processes audio for ASL avatar generation.",
+              "StartAt": "ProcessTranscription",
+              "States": {
+                "ProcessTranscription": {
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::lambda:invoke",
+                  "Parameters": {
+                    "FunctionName": "${ProcessTranscriptionFunctionArn}",
+                    "Payload.$": "$"
+                  },
+                  "ResultPath": "$.ProcessingResult",
+                  "Catch": [
+                    {
+                      "ErrorEquals": ["States.TaskFailed"],
+                      "Next": "HandleTranscriptionFailure"
+                    }
+                  ],
+                  "Next": "GenerateASLAvatar"
+                },
+                "HandleTranscriptionFailure": {
+                  "Type": "Fail",
+                  "Cause": "Transcription failed",
+                  "Error": "TranscriptionError"
+                },
+                "GenerateASLAvatar": {
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::lambda:invoke",
+                  "Parameters": {
+                    "FunctionName": "${GenerateASLAvatarFunctionArn}",
+                    "Payload.$": "$"
+                  },
+                  "ResultPath": "$.ASLAvatarResult",
+                  "End": true
+                }
+              }
+            }
+          - ProcessTranscriptionFunctionArn: !GetAtt ProcessTranscriptionFunction.Arn
+            GenerateASLAvatarFunctionArn: !GetAtt GenerateASLAvatarFunction.Arn
+      RoleArn: !GetAtt StatesExecutionRole.Arn
+      Tags:
+        - Key: project
+          Value: !Ref AWS::StackName
+
+  ProcessTranscriptionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: process_transcription/
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref AudioInputBucket
+        - S3WritePolicy:
+            BucketName: !Ref OutputVideoBucket
+        - SQSPollerPolicy:
+            QueueName: !GetAtt ProcessingQueue.QueueName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt ProcessingQueue.QueueName
+      Environment:
+        Variables:
+          OUTPUT_BUCKET: !Ref OutputVideoBucket
+          PROCESSING_QUEUE_URL: !Ref ProcessingQueue
+
+  GenerateASLAvatarFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: generate_asl_avatar/
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      MemorySize: 2048
+      Timeout: 600
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref AudioInputBucket
+        - S3WritePolicy:
+            BucketName: !Ref OutputVideoBucket
+        - Statement:
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel # Keep the broader Bedrock permission for now
+            Resource: "*" # Keep the broader resource for Bedrock for now
+        # --- NEW POLICY: Allow S3 Read from ASL Sign Video Bucket ---
+        - Statement:
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !Sub "arn:${AWS::Partition}:s3:::${ASLSignVideoBucket}"
+              - !Sub "arn:${AWS::Partition}:s3:::${ASLSignVideoBucket}/*"
+        # --- NEW POLICY: Allow DynamoDB Read for ASL Sign Mapping Table ---
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:BatchGetItem
+            Resource: !GetAtt ASLSignMappingTable.Arn # Reference the DynamoDB table ARN
+      Environment:
+        Variables:
+          OUTPUT_BUCKET: !Ref OutputVideoBucket
+          ASL_SIGN_VIDEO_BUCKET: !Ref ASLSignVideoBucket # Pass bucket name to Lambda
+          ASL_SIGN_MAPPING_TABLE: !Ref ASLSignMappingTable # Pass table name to Lambda
+
+  StatesExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${AudioInputBucket}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${OutputVideoBucket}/*"
+        - PolicyName: SQSAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt ProcessingQueue.Arn
+
+  # --- NEW RESOURCES: S3 Bucket for ASL Sign Videos and DynamoDB Table ---
+  ASLSignVideoBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "genasl-backend-hackathon-asl-signs-${AWS::AccountId}" # Unique bucket name
+      Tags:
+        - Key: project
+          Value: !Ref AWS::StackName
+    DeletionPolicy: Retain # IMPORTANT: Retain this bucket on stack deletion to preserve your video assets
+
+  ASLSignMappingTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ASLSignMapping # You can choose a different name
+      AttributeDefinitions:
+        - AttributeName: gloss_term
+          AttributeType: S # String type for the partition key
+      KeySchema:
+        - AttributeName: gloss_term
+          KeyType: HASH # HASH for partition key
+      BillingMode: PAY_PER_REQUEST # Cost-effective for low-traffic
+
+Outputs:
+  ProcessingStateMachineArn:
+    Description: "Step Functions State Machine ARN"
+    Value: !Ref ProcessingStateMachine
+    Export:
+      Name: !Sub "${AWS::StackName}-ProcessingStateMachineArn"
+
+  AudioInputBucketName:
+    Description: "S3 Bucket for Audio Input"
+    Value: !Ref AudioInputBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-AudioInputBucketName"
+
+  OutputVideoBucketName:
+    Description: "S3 Bucket for Output Video"
+    Value: !Ref OutputVideoBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-OutputVideoBucketName"
+
+  ASLSignVideoBucketName:
+    Description: "S3 Bucket for ASL Sign Videos"
+    Value: !Ref ASLSignVideoBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-ASLSignVideoBucketName"
+
+  ASLSignMappingTableName:
+    Description: "DynamoDB Table for ASL Sign Mapping"
+    Value: !Ref ASLSignMappingTable
+    Export:
+      Name: !Sub "${AWS::StackName}-ASLSignMappingTableName"
+
+  GCSTranscribeLambdaApi:
+    Description: "API Gateway endpoint URL for GCSTranscribeLambda"
+    Value: !Sub "https://${MyAslApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/transcribe-gcs"
