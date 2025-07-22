@@ -16,10 +16,10 @@ html_content = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>BridgeSpeak Backend</title>
+    <title>Interlude Backend</title>
 </head>
 <body>
-    <h1>BridgeSpeak Backend is Running!</h1>
+    <h1>Interlude Backend is Running!</h1>
     <p>Socket.IO and WebRTC signaling server for real-time communication.</p>
 </body>
 </html>
@@ -31,7 +31,7 @@ async def read_root():
 
 @app.get("/hello")
 async def hello_world():
-    return {"message": "Hello from BridgeSpeak API!"}
+    return {"message": "Hello from Interlude API!"}
 
 # Status endpoint to monitor rooms and users
 @app.get("/status")

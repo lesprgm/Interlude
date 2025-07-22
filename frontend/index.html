@@ -3,79 +3,181 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BridgeSpeak - Real-time Communication Aid</title>
+    <title>Interlude - Real-time Communication Aid</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>BridgeSpeak - Real-time Communication Aid</h1>
+    <div class="app-container">
+        <!-- Header with Logo and Branding -->
+        <header class="app-header">
+            <div class="logo-container">
+                <div class="logo-icon">
+                    <img src="public/images/interludelogo.png" alt="Interlude Logo" class="logo-image" />
+                </div>
+                <div class="logo-text">
+                    <p>Real-time Communication Aid</p>
+                </div>
+            </div>
+            <div class="connection-indicator">
+                <div id="connectionStatus" class="status-dot"></div>
+                <span id="connectionText">Connecting...</span>
+            </div>
         </header>
 
-        <main>
-            <div class="video-container">
-                <!-- Local video stream (user's own camera) -->
-                <div class="video-wrapper local-video">
-                    <video id="localVideo" autoplay muted playsinline></video>
-                    <div class="video-label">You</div>
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Video Grid -->
+            <div class="video-grid">
+                <div class="video-card local-video-card">
+                    <div class="video-wrapper">
+                        <video id="localVideo" autoplay muted playsinline></video>
+                        <div class="video-overlay">
+                            <div class="video-label">You</div>
+                            <div class="video-controls">
+                                <button id="toggleVideoBtn" class="control-btn video-btn active" title="Toggle Video">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="m23 7-7 5 7 5V7z"/>
+                                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                                    </svg>
+                                </button>
+                                <button id="toggleAudioBtn" class="control-btn audio-btn active" title="Toggle Audio">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                                        <line x1="12" y1="19" x2="12" y2="23"/>
+                                        <line x1="8" y1="23" x2="16" y2="23"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Remote video stream (other participant's camera) -->
-                <div class="video-wrapper remote-video">
-                    <video id="remoteVideo" autoplay playsinline></video>
-                    <div class="video-label">Remote Participant</div>
+                <div class="video-card remote-video-card">
+                    <div class="video-wrapper">
+                        <video id="remoteVideo" autoplay playsinline></video>
+                        <div class="video-overlay">
+                            <div class="video-label">Remote Participant</div>
+                            <div class="video-placeholder" id="remoteVideoPlaceholder">
+                                <div class="placeholder-content">
+                                    <div class="placeholder-icon">
+                                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                                            <circle cx="12" cy="7" r="4"/>
+                                        </svg>
+                                    </div>
+                                    <p>Waiting for participant...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- ASL Avatar container for sign language interpretation -->
-            <div class="asl-avatar-container">
-                <div id="aslAvatar" class="asl-avatar">
-                    <div class="avatar-placeholder">ASL Avatar will appear here</div>
+            <!-- ASL Avatar Section -->
+            <div class="asl-section">
+                <div class="section-header">
+                    <h3>ASL Interpreter</h3>
+                    <div class="status-indicator" id="aslStatus">
+                        <div class="status-dot"></div>
+                        <span>Ready</span>
+                    </div>
                 </div>
-                <div class="avatar-label">ASL Interpreter</div>
-            </div>
-
-            <!-- Control buttons -->
-            <div class="controls">
-                <button id="startCallBtn" class="btn primary">Start Call</button>
-                <button id="endCallBtn" class="btn secondary" disabled>End Call</button>
-                <button id="toggleVideoBtn" class="btn secondary">Toggle Video</button>
-                <button id="toggleAudioBtn" class="btn secondary">Toggle Audio</button>
-            </div>
-
-            <!-- Status messages -->
-            <div id="statusMessage" class="status-message">
-                Ready to connect...
-            </div>
-
-            <!-- Communication mode indicators -->
-            <div class="communication-modes">
-                <div class="mode-indicator">
-                    <span class="mode-label">Speech → ASL:</span>
-                    <span id="speechToAslStatus" class="status">Ready</span>
+                <div class="asl-avatar-container">
+                    <div id="aslAvatar" class="asl-avatar">
+                        <div class="avatar-placeholder">
+                            <div class="avatar-icon">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M9 12l2 2 4-4"/>
+                                    <circle cx="12" cy="12" r="10"/>
+                                </svg>
+                            </div>
+                            <p>ASL Avatar will appear here</p>
+                        </div>
+                    </div>
                 </div>
-                <div class="mode-indicator">
-                    <span class="mode-label">ASL → Speech:</span>
-                    <span id="aslToSpeechStatus" class="status">Ready</span>
+            </div>
+
+            <!-- Communication Status -->
+            <div class="communication-panel">
+                <div class="communication-modes">
+                    <div class="mode-card">
+                        <div class="mode-header">
+                            <h4>Speech → ASL</h4>
+                            <div class="mode-status" id="speechToAslStatus">Ready</div>
+                        </div>
+                    </div>
+                    <div class="mode-card">
+                        <div class="mode-header">
+                            <h4>ASL → Speech</h4>
+                            <div class="mode-status" id="aslToSpeechStatus">Ready</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </main>
+
+        <!-- Control Panel -->
+        <div class="control-panel">
+            <div class="primary-controls">
+                <button id="startCallBtn" class="primary-btn start-btn">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+                    </svg>
+                    Start Call
+                </button>
+                <button id="endCallBtn" class="primary-btn end-btn" disabled>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+                        <line x1="1" y1="1" x2="23" y2="23"/>
+                    </svg>
+                    End Call
+                </button>
+            </div>
+        </div>
+
+        <!-- Status Messages -->
+        <div id="statusMessage" class="status-message">
+            <div class="status-content">
+                <div class="status-icon">
+                    <div class="spinner"></div>
+                </div>
+                <span>Ready to connect...</span>
+            </div>
+        </div>
+
+        <!-- Room Selection Modal -->
+        <div id="roomSelection" class="modal-overlay">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Join a Room</h2>
+                    <p>Enter a room ID to start your video call</p>
+                </div>
+                <div class="modal-body">
+                    <div class="input-group">
+                        <label for="roomIdInput">Room ID</label>
+                        <input type="text" id="roomIdInput" placeholder="Enter room ID..." value="interlude-room">
+                        <div class="input-hint">Share the same Room ID with someone to start a video call</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="joinRoomBtn" class="primary-btn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M15 3h6v6"/>
+                            <path d="M10 14 21 3"/>
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                        </svg>
+                        Join Room
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <!-- Room selection UI -->
-    <div id="roomSelection" class="room-selection">
-        <div class="room-input">
-            <label for="roomIdInput">Enter Room ID:</label>
-            <input type="text" id="roomIdInput" placeholder="room-123" value="test-room">
-            <button id="joinRoomBtn" class="btn primary">Join Room</button>
-        </div>
-        <p class="room-help">Share the same Room ID with someone to start a video call</p>
-        <div class="connection-status">
-            <span id="connectionStatus" class="status">Not connected</span>
-        </div>
-    </div>
-
-    <!-- Socket.IO Client via CDN (compatible version) -->
+    <!-- Scripts -->
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="app.js"></script>
 </body>

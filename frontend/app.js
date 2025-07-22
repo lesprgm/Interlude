@@ -1,7 +1,7 @@
-// BridgeSpeak - Real-time Communication Aid
+// Interlude - Real-time Communication Aid
 // Main application JavaScript
 
-class BridgeSpeakApp {
+class InterludeApp {
     constructor() {
         this.localVideo = null;
         this.remoteVideo = null;
@@ -41,10 +41,13 @@ class BridgeSpeakApp {
         this.roomIdInput = document.getElementById('roomIdInput');
         this.joinRoomBtn = document.getElementById('joinRoomBtn');
         this.connectionStatus = document.getElementById('connectionStatus');
+        this.connectionText = document.getElementById('connectionText');
+        this.remoteVideoPlaceholder = document.getElementById('remoteVideoPlaceholder');
 
         this.initializeSocket();
         this.bindEventListeners();
         this.checkBrowserCompatibility();
+        this.initializeUI();
     }
 
     bindEventListeners() {
@@ -65,14 +68,14 @@ class BridgeSpeakApp {
             
             // Socket event handlers
             this.socket.on('connect', () => {
-                this.connectionStatus.textContent = 'Connected to server';
-                this.connectionStatus.className = 'status connected';
+                this.connectionStatus.className = 'status-dot connected';
+                this.connectionText.textContent = 'Connected';
                 this.updateStatus('Connected to signaling server', 'success');
             });
 
             this.socket.on('disconnect', () => {
-                this.connectionStatus.textContent = 'Disconnected';
-                this.connectionStatus.className = 'status';
+                this.connectionStatus.className = 'status-dot';
+                this.connectionText.textContent = 'Disconnected';
                 this.updateStatus('Disconnected from signaling server', 'error');
             });
 
@@ -82,8 +85,9 @@ class BridgeSpeakApp {
                 this.isInitiator = true;
                 this.updateStatus(`User joined. Preparing to initiate call...`, 'info');
                 
+                // Only create offer if we already have local media and peer connection
                 if (this.localStream && this.peerConnection) {
-                    this.createOffer();
+                    setTimeout(() => this.createOffer(), 500);
                 }
             });
 
@@ -140,7 +144,7 @@ class BridgeSpeakApp {
         this.socket.emit('join_room', { roomId: roomId });
         this.updateStatus(`Joining room: ${roomId}...`, 'info');
         
-        // Hide room selection UI
+        // Hide room selection modal
         document.getElementById('roomSelection').style.display = 'none';
     }
 
@@ -209,6 +213,11 @@ class BridgeSpeakApp {
             this.endCallBtn.disabled = false;
             this.updateStatus('WebRTC connection ready! Waiting for remote participant...', 'success');
 
+            // If we have a peer connection but no tracks added, add them now
+            if (this.peerConnection && this.localStream) {
+                this.addLocalTracksToConnection();
+            }
+
             // If we're the initiator and have a remote peer, create an offer
             if (this.isInitiator && this.remotePeerId) {
                 setTimeout(() => {
@@ -275,7 +284,16 @@ class BridgeSpeakApp {
             if (videoTrack) {
                 this.isVideoEnabled = !this.isVideoEnabled;
                 videoTrack.enabled = this.isVideoEnabled;
-                this.toggleVideoBtn.textContent = this.isVideoEnabled ? 'Turn Off Video' : 'Turn On Video';
+                
+                // Update button visual state
+                if (this.isVideoEnabled) {
+                    this.toggleVideoBtn.classList.add('active');
+                    this.toggleVideoBtn.title = 'Turn off video';
+                } else {
+                    this.toggleVideoBtn.classList.remove('active');
+                    this.toggleVideoBtn.title = 'Turn on video';
+                }
+                
                 this.updateStatus(this.isVideoEnabled ? 'Video enabled' : 'Video disabled', 'info');
             }
         }
@@ -287,7 +305,16 @@ class BridgeSpeakApp {
             if (audioTrack) {
                 this.isAudioEnabled = !this.isAudioEnabled;
                 audioTrack.enabled = this.isAudioEnabled;
-                this.toggleAudioBtn.textContent = this.isAudioEnabled ? 'Mute' : 'Unmute';
+                
+                // Update button visual state
+                if (this.isAudioEnabled) {
+                    this.toggleAudioBtn.classList.add('active');
+                    this.toggleAudioBtn.title = 'Mute audio';
+                } else {
+                    this.toggleAudioBtn.classList.remove('active');
+                    this.toggleAudioBtn.title = 'Unmute audio';
+                }
+                
                 this.updateStatus(this.isAudioEnabled ? 'Audio enabled' : 'Audio disabled', 'info');
             }
         }
@@ -300,7 +327,7 @@ class BridgeSpeakApp {
             
             // Add local stream tracks to peer connection
             if (this.localStream) {
-                this.localStream.getTracks().forEach(track => {
+                this.localStream.getTracks().forEach((track) => {
                     this.peerConnection.addTrack(track, this.localStream);
                 });
             }
@@ -344,6 +371,8 @@ class BridgeSpeakApp {
             if (event.streams && event.streams[0]) {
                 this.remoteStream = event.streams[0];
                 this.remoteVideo.srcObject = this.remoteStream;
+                // Hide placeholder and show video
+                this.remoteVideoPlaceholder.style.display = 'none';
                 this.updateStatus('Remote video stream connected!', 'success');
             }
         };
@@ -371,9 +400,36 @@ class BridgeSpeakApp {
         }
     }
 
+    // Helper function to add local tracks to peer connection
+    addLocalTracksToConnection() {
+        if (!this.peerConnection || !this.localStream) {
+            return;
+        }
+
+        // Check if tracks are already added
+        const senders = this.peerConnection.getSenders();
+        const hasVideoSender = senders.some(sender => sender.track?.kind === 'video');
+        const hasAudioSender = senders.some(sender => sender.track?.kind === 'audio');
+
+        if (hasVideoSender && hasAudioSender) {
+            return;
+        }
+
+        this.localStream.getTracks().forEach((track) => {
+            const existingSender = senders.find(sender => sender.track?.kind === track.kind);
+            if (!existingSender) {
+                this.peerConnection.addTrack(track, this.localStream);
+            }
+        });
+    }
+
     // WebRTC Signaling Methods
     async createOffer() {
         try {
+            if (!this.peerConnection || !this.remotePeerId) {
+                return;
+            }
+            
             const offer = await this.peerConnection.createOffer({
                 offerToReceiveAudio: true,
                 offerToReceiveVideo: true
@@ -396,9 +452,48 @@ class BridgeSpeakApp {
 
     async handleOffer(offer, senderId) {
         try {
+            // Ensure we have local media first
+            if (!this.localStream) {
+                this.updateStatus('Getting camera for incoming call...', 'info');
+                
+                try {
+                    // Get user media with same constraints as startCall
+                    let mediaConstraints = {
+                        video: {
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 },
+                            frameRate: { ideal: 30 }
+                        },
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        }
+                    };
+
+                    try {
+                        this.localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+                    } catch (constraintError) {
+                        mediaConstraints = { video: true, audio: true };
+                        this.localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+                    }
+                    
+                    // Display local video
+                    this.localVideo.srcObject = this.localStream;
+                    
+                } catch (error) {
+                    console.error('Failed to get media for incoming call:', error);
+                    this.updateStatus('Failed to access camera for incoming call', 'error');
+                    return;
+                }
+            }
+            
             // Ensure we have a peer connection
             if (!this.peerConnection) {
                 await this.initializePeerConnection();
+            } else {
+                // If peer connection exists, make sure our local tracks are added
+                this.addLocalTracksToConnection();
             }
             
             await this.peerConnection.setRemoteDescription(offer);
@@ -460,8 +555,13 @@ class BridgeSpeakApp {
         this.remotePeerId = null;
         this.isInitiator = false;
         
-        // Show room selection again
-        document.getElementById('roomSelection').style.display = 'block';
+        // Show room selection modal again
+        document.getElementById('roomSelection').style.display = 'flex';
+        
+        // Show remote video placeholder
+        if (this.remoteVideoPlaceholder) {
+            this.remoteVideoPlaceholder.style.display = 'flex';
+        }
         
         // Close peer connection
         if (this.peerConnection) {
@@ -481,17 +581,40 @@ class BridgeSpeakApp {
     }
 
     updateStatus(message, type = 'info') {
-        this.statusMessage.textContent = message;
-        this.statusMessage.className = `status-message ${type}`;
+        // Update the status message content
+        const statusContent = this.statusMessage.querySelector('.status-content span') || this.statusMessage.querySelector('span');
+        if (statusContent) {
+            statusContent.textContent = message;
+        }
+        
+        // Update the status message classes
+        this.statusMessage.className = `status-message ${type} show`;
+        
+        // Hide the status message after 5 seconds
+        setTimeout(() => {
+            this.statusMessage.classList.remove('show');
+        }, 5000);
+    }
+
+    initializeUI() {
+        // Set initial connection state
+        this.connectionText.textContent = 'Connecting...';
+        
+        // Set initial button states
+        this.toggleVideoBtn.classList.add('active');
+        this.toggleAudioBtn.classList.add('active');
+        
+        // Initialize modal display
+        document.getElementById('roomSelection').style.display = 'flex';
     }
 }
 
 // Initialize the application when the DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    window.bridgeSpeakApp = new BridgeSpeakApp();
+    window.interludeApp = new InterludeApp();
 });
 
 // Export for potential module usage
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = BridgeSpeakApp;
+    module.exports = InterludeApp;
 } 
