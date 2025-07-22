@@ -9,10 +9,9 @@ sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins="*")
 app = FastAPI()
 
 # Wrap FastAPI app with Socket.IO ASGI app
-# This makes the Socket.IO server accessible at /socket.io/ (default)
 app_with_sio = socketio.ASGIApp(sio, app)
 
-# HTML for the root endpoint (for testing browser access)
+# HTML for the root endpoint
 html_content = """
 <!DOCTYPE html>
 <html>
@@ -21,7 +20,7 @@ html_content = """
 </head>
 <body>
     <h1>BridgeSpeak Backend is Running!</h1>
-    <p>This is the root endpoint. Socket.IO and other APIs will be here.</p>
+    <p>Socket.IO and WebRTC signaling server for real-time communication.</p>
 </body>
 </html>
 """
@@ -30,27 +29,117 @@ html_content = """
 async def read_root():
     return HTMLResponse(content=html_content)
 
-# test endpoint for FastAPI (optional, but good for quick check)
 @app.get("/hello")
 async def hello_world():
-    return {"message": "Hello from FastAPI!"}
+    return {"message": "Hello from BridgeSpeak API!"}
+
+# Status endpoint to monitor rooms and users
+@app.get("/status")
+async def get_status():
+    return {
+        "status": "active",
+        "active_rooms": len(rooms),
+        "active_users": len(users),
+        "rooms_detail": {room_id: list(room_users) for room_id, room_users in rooms.items()}
+    }
+
+# Store active rooms and users
+rooms = {}
+users = {}
 
 # Socket.IO Event Handlers
 @sio.event
 async def connect(sid, environ):
-    print(f"Client connected: {sid}")
+    users[sid] = {
+        'id': sid,
+        'room': None,
+        'connected': True
+    }
     await sio.emit('message', f'Welcome, {sid}!', room=sid)
 
 @sio.event
-async def disconnect(sid):
-    print(f"Client disconnected: {sid}")
+async def disconnect(sid, data=None):
+    # Handle room cleanup
+    user = users.get(sid)
+    if user and user['room']:
+        room_id = user['room']
+        if room_id in rooms:
+            rooms[room_id].discard(sid)
+            
+            # Notify other users in the room
+            await sio.emit('user-left', {'userId': sid}, room=room_id, skip_sid=sid)
+            
+            # Clean up empty room
+            if room_id in rooms and len(rooms[room_id]) == 0:
+                del rooms[room_id]
+    
+    # Remove user
+    if sid in users:
+        del users[sid]
+
+@sio.event
+async def join_room(sid, data):
+    room_id = data['roomId']
+    
+    # Leave previous room if any
+    user = users.get(sid)
+    if user and user['room']:
+        await sio.leave_room(sid, user['room'])
+    
+    # Join new room
+    await sio.enter_room(sid, room_id)
+    users[sid]['room'] = room_id
+    
+    # Initialize room if it doesn't exist
+    if room_id not in rooms:
+        rooms[room_id] = set()
+    
+    room = rooms[room_id]
+    room.add(sid)
+    
+    # If this is the second user, initiate connection
+    if len(room) == 2:
+        room_users = list(room)
+        other_user = room_users[0] if room_users[1] == sid else room_users[1]
+        
+        # Tell the other user that someone joined
+        await sio.emit('user-joined', {'userId': sid}, room=other_user)
+        await sio.emit('user-ready', {'userId': other_user}, room=sid)
+    elif len(room) > 2:
+        await sio.emit('room-full', room=sid)
+
+# WebRTC Signaling Events  
+@sio.on('webrtc-offer')
+async def webrtc_offer(sid, data):
+    to_sid = data.get('to')
+    if to_sid:
+        await sio.emit('webrtc-offer', {
+            'offer': data['offer'],
+            'from': sid
+        }, room=to_sid)
+
+@sio.on('webrtc-answer')
+async def webrtc_answer(sid, data):
+    to_sid = data.get('to')
+    if to_sid:
+        await sio.emit('webrtc-answer', {
+            'answer': data['answer'],
+            'from': sid
+        }, room=to_sid)
+
+@sio.on('webrtc-ice-candidate')
+async def webrtc_ice_candidate(sid, data):
+    to_sid = data.get('to')
+    if to_sid:
+        await sio.emit('webrtc-ice-candidate', {
+            'candidate': data['candidate'],
+            'from': sid
+        }, room=to_sid)
 
 @sio.event
 async def message(sid, data):
-    print(f"Message from {sid}: {data}")
-    # Echo message back for testing
+    # Echo message back
     await sio.emit('message', f'Server received: {data}', room=sid)
-
 
 if __name__ == "__main__":
     # When running with uvicorn directly, you use the app_with_sio
