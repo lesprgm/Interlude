@@ -9,7 +9,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>Asake is ass</h1>
+            <h1>BridgeSpeak - Real-time Communication Aid</h1>
         </header>
 
         <main>
@@ -62,6 +62,21 @@
         </main>
     </div>
 
+    <!-- Room selection UI -->
+    <div id="roomSelection" class="room-selection">
+        <div class="room-input">
+            <label for="roomIdInput">Enter Room ID:</label>
+            <input type="text" id="roomIdInput" placeholder="room-123" value="test-room">
+            <button id="joinRoomBtn" class="btn primary">Join Room</button>
+        </div>
+        <p class="room-help">Share the same Room ID with someone to start a video call</p>
+        <div class="connection-status">
+            <span id="connectionStatus" class="status">Not connected</span>
+        </div>
+    </div>
+
+    <!-- Socket.IO Client via CDN (compatible version) -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html> 

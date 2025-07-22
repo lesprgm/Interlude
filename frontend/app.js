@@ -8,9 +8,13 @@ class BridgeSpeakApp {
         this.localStream = null;
         this.remoteStream = null;
         this.peerConnection = null;
+        this.socket = null;
         this.isCallActive = false;
         this.isVideoEnabled = true;
         this.isAudioEnabled = true;
+        this.currentRoom = null;
+        this.remotePeerId = null;
+        this.isInitiator = false;
         
         // WebRTC Configuration with STUN servers
         this.rtcConfiguration = {
@@ -20,13 +24,10 @@ class BridgeSpeakApp {
             ]
         };
         
-        // Initialize the application
         this.init();
     }
 
     init() {
-        console.log('Initializing BridgeSpeak...');
-        
         // Get DOM elements
         this.localVideo = document.getElementById('localVideo');
         this.remoteVideo = document.getElementById('remoteVideo');
@@ -37,11 +38,12 @@ class BridgeSpeakApp {
         this.statusMessage = document.getElementById('statusMessage');
         this.speechToAslStatus = document.getElementById('speechToAslStatus');
         this.aslToSpeechStatus = document.getElementById('aslToSpeechStatus');
+        this.roomIdInput = document.getElementById('roomIdInput');
+        this.joinRoomBtn = document.getElementById('joinRoomBtn');
+        this.connectionStatus = document.getElementById('connectionStatus');
 
-        // Bind event listeners
+        this.initializeSocket();
         this.bindEventListeners();
-
-        // Check browser compatibility
         this.checkBrowserCompatibility();
     }
 
@@ -50,6 +52,96 @@ class BridgeSpeakApp {
         this.endCallBtn.addEventListener('click', () => this.endCall());
         this.toggleVideoBtn.addEventListener('click', () => this.toggleVideo());
         this.toggleAudioBtn.addEventListener('click', () => this.toggleAudio());
+        this.joinRoomBtn.addEventListener('click', () => this.joinRoom());
+        this.roomIdInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.joinRoom();
+        });
+    }
+
+    initializeSocket() {
+        try {
+            // Connect to the backend signaling server
+            this.socket = io('http://localhost:8000');
+            
+            // Socket event handlers
+            this.socket.on('connect', () => {
+                this.connectionStatus.textContent = 'Connected to server';
+                this.connectionStatus.className = 'status connected';
+                this.updateStatus('Connected to signaling server', 'success');
+            });
+
+            this.socket.on('disconnect', () => {
+                this.connectionStatus.textContent = 'Disconnected';
+                this.connectionStatus.className = 'status';
+                this.updateStatus('Disconnected from signaling server', 'error');
+            });
+
+            // WebRTC Signaling Events
+            this.socket.on('user-joined', (data) => {
+                this.remotePeerId = data.userId;
+                this.isInitiator = true;
+                this.updateStatus(`User joined. Preparing to initiate call...`, 'info');
+                
+                if (this.localStream && this.peerConnection) {
+                    this.createOffer();
+                }
+            });
+
+            this.socket.on('user-ready', (data) => {
+                this.remotePeerId = data.userId;
+                this.isInitiator = false;
+                this.updateStatus(`Connected to room. Waiting for call invitation...`, 'info');
+            });
+
+            this.socket.on('webrtc-offer', async (data) => {
+                await this.handleOffer(data.offer, data.from);
+            });
+
+            this.socket.on('webrtc-answer', async (data) => {
+                await this.handleAnswer(data.answer);
+            });
+
+            this.socket.on('webrtc-ice-candidate', async (data) => {
+                await this.handleIceCandidate(data.candidate);
+            });
+
+            this.socket.on('user-left', (data) => {
+                this.handleUserLeft(data.userId);
+            });
+
+            this.socket.on('room-full', () => {
+                this.updateStatus('Room is full. Maximum 2 users per room.', 'error');
+            });
+
+            this.socket.on('error', (error) => {
+                console.error('Socket.IO error:', error);
+                this.updateStatus(`Connection error: ${error}`, 'error');
+            });
+
+        } catch (error) {
+            console.error('Failed to initialize Socket.IO:', error);
+            this.updateStatus('Failed to connect to signaling server', 'error');
+        }
+    }
+
+    joinRoom() {
+        const roomId = this.roomIdInput.value.trim();
+        if (!roomId) {
+            this.updateStatus('Please enter a room ID', 'error');
+            return;
+        }
+
+        if (!this.socket || !this.socket.connected) {
+            this.updateStatus('Not connected to signaling server', 'error');
+            return;
+        }
+
+        this.currentRoom = roomId;
+        this.socket.emit('join_room', { roomId: roomId });
+        this.updateStatus(`Joining room: ${roomId}...`, 'info');
+        
+        // Hide room selection UI
+        document.getElementById('roomSelection').style.display = 'none';
     }
 
     checkBrowserCompatibility() {
@@ -68,16 +160,20 @@ class BridgeSpeakApp {
             return false;
         }
         
-        console.log('WebRTC compatibility check passed:', checks);
         return true;
     }
 
     async startCall() {
         try {
+            // Check if browser supports getUserMedia
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('getUserMedia is not supported by this browser. Please use Chrome, Firefox, Safari, or Edge.');
+            }
+
             this.updateStatus('Starting camera and microphone...', 'info');
             
             // Enhanced media constraints for better quality
-            const mediaConstraints = {
+            let mediaConstraints = {
                 video: {
                     width: { ideal: 1280 },
                     height: { ideal: 720 },
@@ -90,9 +186,15 @@ class BridgeSpeakApp {
                 }
             };
 
-            // Request access to camera and microphone with enhanced constraints
-            this.localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-            console.log('Local media stream acquired:', this.localStream);
+            // Request access to camera and microphone
+            try {
+                this.localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+            } catch (constraintError) {
+                // If enhanced constraints fail, try basic constraints
+                console.warn('Enhanced constraints failed, trying basic:', constraintError);
+                mediaConstraints = { video: true, audio: true };
+                this.localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+            }
 
             // Display local video stream
             this.localVideo.srcObject = this.localStream;
@@ -107,7 +209,14 @@ class BridgeSpeakApp {
             this.endCallBtn.disabled = false;
             this.updateStatus('WebRTC connection ready! Waiting for remote participant...', 'success');
 
-            // Start ASL recognition and speech processing (placeholder)
+            // If we're the initiator and have a remote peer, create an offer
+            if (this.isInitiator && this.remotePeerId) {
+                setTimeout(() => {
+                    this.createOffer();
+                }, 1000);
+            }
+
+            // Start ASL recognition and speech processing
             this.startAslRecognition();
             this.startSpeechProcessing();
 
@@ -186,15 +295,12 @@ class BridgeSpeakApp {
 
     async initializePeerConnection() {
         try {
-            console.log('Initializing RTCPeerConnection with configuration:', this.rtcConfiguration);
-            
             // Create RTCPeerConnection with STUN server configuration
             this.peerConnection = new RTCPeerConnection(this.rtcConfiguration);
             
             // Add local stream tracks to peer connection
             if (this.localStream) {
                 this.localStream.getTracks().forEach(track => {
-                    console.log('Adding local track to peer connection:', track.kind);
                     this.peerConnection.addTrack(track, this.localStream);
                 });
             }
@@ -202,7 +308,6 @@ class BridgeSpeakApp {
             // Set up WebRTC event handlers
             this.setupPeerConnectionEventHandlers();
             
-            console.log('RTCPeerConnection initialized successfully');
             this.updateStatus('WebRTC peer connection established', 'info');
             
         } catch (error) {
@@ -215,30 +320,27 @@ class BridgeSpeakApp {
     setupPeerConnectionEventHandlers() {
         // Handle ICE candidate events
         this.peerConnection.onicecandidate = (event) => {
-            console.log('ICE candidate event:', event);
-            if (event.candidate) {
-                console.log('New ICE candidate:', event.candidate);
-                // TODO: Send candidate to remote peer via signaling server
-            } else {
-                console.log('ICE candidate gathering complete');
+            if (event.candidate && this.remotePeerId && this.socket) {
+                this.socket.emit('webrtc-ice-candidate', {
+                    candidate: event.candidate,
+                    to: this.remotePeerId,
+                    from: this.socket.id
+                });
             }
         };
 
         // Handle ICE connection state changes
         this.peerConnection.oniceconnectionstatechange = () => {
-            console.log('ICE connection state:', this.peerConnection.iceConnectionState);
             this.updateConnectionStatus();
         };
 
         // Handle peer connection state changes
         this.peerConnection.onconnectionstatechange = () => {
-            console.log('Peer connection state:', this.peerConnection.connectionState);
             this.updateConnectionStatus();
         };
 
         // Handle remote stream
         this.peerConnection.ontrack = (event) => {
-            console.log('Remote track received:', event);
             if (event.streams && event.streams[0]) {
                 this.remoteStream = event.streams[0];
                 this.remoteVideo.srcObject = this.remoteStream;
@@ -247,17 +349,15 @@ class BridgeSpeakApp {
         };
 
         // Handle negotiation needed
-        this.peerConnection.onnegotiationneeded = () => {
-            console.log('Negotiation needed');
-            // TODO: Handle offer/answer negotiation when implementing signaling
+        this.peerConnection.onnegotiationneeded = async () => {
+            if (this.isInitiator && this.remotePeerId && this.socket && this.socket.connected) {
+                await this.createOffer();
+            }
         };
     }
 
     updateConnectionStatus() {
         const iceState = this.peerConnection?.iceConnectionState || 'not-started';
-        const connectionState = this.peerConnection?.connectionState || 'not-started';
-        
-        console.log(`Connection status - ICE: ${iceState}, Peer: ${connectionState}`);
         
         // Update UI based on connection state
         if (iceState === 'connected' || iceState === 'completed') {
@@ -271,24 +371,118 @@ class BridgeSpeakApp {
         }
     }
 
+    // WebRTC Signaling Methods
+    async createOffer() {
+        try {
+            const offer = await this.peerConnection.createOffer({
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: true
+            });
+            
+            await this.peerConnection.setLocalDescription(offer);
+            
+            this.socket.emit('webrtc-offer', {
+                offer: offer,
+                to: this.remotePeerId,
+                from: this.socket.id
+            });
+            
+            this.updateStatus('WebRTC offer sent to remote peer', 'info');
+        } catch (error) {
+            console.error('Error creating offer:', error);
+            this.updateStatus(`Failed to create offer: ${error.message}`, 'error');
+        }
+    }
+
+    async handleOffer(offer, senderId) {
+        try {
+            // Ensure we have a peer connection
+            if (!this.peerConnection) {
+                await this.initializePeerConnection();
+            }
+            
+            await this.peerConnection.setRemoteDescription(offer);
+            
+            const answer = await this.peerConnection.createAnswer();
+            await this.peerConnection.setLocalDescription(answer);
+            
+            this.socket.emit('webrtc-answer', {
+                answer: answer,
+                to: senderId,
+                from: this.socket.id
+            });
+            
+            this.updateStatus('WebRTC answer sent to remote peer', 'success');
+        } catch (error) {
+            console.error('Error handling offer:', error);
+            this.updateStatus(`Failed to handle offer: ${error.message}`, 'error');
+        }
+    }
+
+    async handleAnswer(answer) {
+        try {
+            // Ensure we have a peer connection
+            if (!this.peerConnection) {
+                this.updateStatus('Error: No peer connection for answer', 'error');
+                return;
+            }
+            
+            await this.peerConnection.setRemoteDescription(answer);
+            this.updateStatus('WebRTC connection established!', 'success');
+        } catch (error) {
+            console.error('Error handling answer:', error);
+            this.updateStatus(`Failed to handle answer: ${error.message}`, 'error');
+        }
+    }
+
+    async handleIceCandidate(candidate) {
+        try {
+            // Ensure we have a peer connection
+            if (!this.peerConnection) {
+                await this.initializePeerConnection();
+            }
+            
+            await this.peerConnection.addIceCandidate(candidate);
+        } catch (error) {
+            console.error('Error adding ICE candidate:', error);
+        }
+    }
+
+    handleUserLeft(userId) {
+        this.updateStatus('Remote user disconnected', 'info');
+        
+        // Clear remote video
+        if (this.remoteVideo) {
+            this.remoteVideo.srcObject = null;
+        }
+        
+        // Reset remote peer info
+        this.remotePeerId = null;
+        this.isInitiator = false;
+        
+        // Show room selection again
+        document.getElementById('roomSelection').style.display = 'block';
+        
+        // Close peer connection
+        if (this.peerConnection) {
+            this.peerConnection.close();
+            this.peerConnection = null;
+        }
+    }
+
     startAslRecognition() {
-        // Placeholder for ASL recognition initialization
-        // This will integrate with MediaPipe for hand/pose detection
-        console.log('Starting ASL recognition...');
+        // ASL recognition initialization
         this.aslToSpeechStatus.textContent = 'Listening for signs...';
     }
 
     startSpeechProcessing() {
-        // Placeholder for speech-to-text and ASL avatar generation
-        // This will integrate with Google Cloud Speech-to-Text and GenASL API
-        console.log('Starting speech processing...');
+        // Speech-to-text and ASL avatar generation
         this.speechToAslStatus.textContent = 'Listening for speech...';
     }
 
     updateStatus(message, type = 'info') {
         this.statusMessage.textContent = message;
         this.statusMessage.className = `status-message ${type}`;
-        console.log(`Status (${type}): ${message}`);
     }
 }
 
