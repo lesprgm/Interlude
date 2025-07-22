@@ -1,4 +1,4 @@
-# BridgeSpeak - Real-time Communication Aid
+# Interlude - Real-time Communication Aid
 
 WebRTC video calling application with Socket.IO signaling for real-time peer-to-peer communication.
 
