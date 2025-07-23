@@ -92,7 +92,7 @@ class InterludeApp {
     initializeSocket() {
         try {
             // Connect to the backend signaling server
-            this.socket = io('http://34.61.230.193:8000');
+            this.socket = io('http://34.61.230.193:8000'); // Ensure this is your VM's public IP
             
             // Socket event handlers
             this.socket.on('connect', () => {
@@ -178,8 +178,9 @@ class InterludeApp {
             });
 
             // Real-time subtitle display handler
-            this.socket.on('subtitle', (data) => {
-                console.log('[Socket.IO] Received subtitle event:', data);
+            // The backend emits 'transcribed_text', not 'subtitle'
+            this.socket.on('transcribed_text', (data) => { // <--- Changed from 'subtitle' to 'transcribed_text'
+                console.log('[Socket.IO] Received transcribed_text event:', data);
                 // data: { text: string, isFinal: boolean }
                 const subtitleDiv = document.getElementById('subtitleDisplay');
                 if (subtitleDiv && data && typeof data.text === 'string') {
@@ -191,7 +192,7 @@ class InterludeApp {
                         subtitleDiv.classList.remove('final');
                     }
                 } else {
-                    console.warn('[Socket.IO] Subtitle event missing text or subtitleDisplay element:', data);
+                    console.warn('[Socket.IO] transcribed_text event missing text or subtitleDisplay element:', data);
                 }
             });
 
@@ -300,7 +301,7 @@ class InterludeApp {
 
             // Start ASL recognition and speech processing
             this.startAslRecognition();
-            this.startSpeechProcessing();
+            this.startSpeechProcessing(); // This will now include logging for data flow
 
         } catch (error) {
             console.error('Error starting call:', error);
@@ -372,6 +373,12 @@ class InterludeApp {
                 
                 this.updateStatus(this.isVideoEnabled ? 'Video enabled' : 'Video disabled', 'info');
             }
+            // If video is disabled, stop ASL recognition as there's no visual input
+            if (!this.isVideoEnabled) {
+                this.stopAslRecognition();
+            } else {
+                this.startAslRecognition();
+            }
         }
     }
 
@@ -423,177 +430,128 @@ class InterludeApp {
             
             this.updateStatus('WebRTC peer connection established', 'info');
             
-        } catch (error) {
+        } catch (error) { // Added catch block
             console.error('Error initializing peer connection:', error);
-            this.updateStatus(`Failed to initialize WebRTC connection: ${error.message}`, 'error');
-            throw error;
+            this.updateStatus(`Failed to initialize peer connection: ${error.message}`, 'error');
+            // Optionally, you might want to end the call or disable call buttons here
+            this.isCallActive = false;
+            this.startCallBtn.disabled = false;
+            this.endCallBtn.disabled = true;
         }
     }
 
     setupPeerConnectionEventHandlers() {
-        // Handle ICE candidate events
+        this.peerConnection.ontrack = (event) => {
+            console.log('Remote track received:', event.streams);
+            if (this.remoteVideo.srcObject !== event.streams[0]) {
+                this.remoteVideo.srcObject = event.streams[0];
+                this.remoteStream = event.streams[0];
+                this.updateStatus('Remote stream connected.', 'success');
+                this.remoteVideoPlaceholder.style.display = 'none'; // Hide placeholder
+                this.remoteVideo.style.display = 'block'; // Show remote video
+            }
+        };
+
         this.peerConnection.onicecandidate = (event) => {
-            if (event.candidate && this.remotePeerId && this.socket) {
+            if (event.candidate) {
+                console.log('Sending ICE candidate:', event.candidate);
                 this.socket.emit('webrtc-ice-candidate', {
-                    candidate: event.candidate,
                     to: this.remotePeerId,
-                    from: this.socket.id
+                    candidate: event.candidate
                 });
             }
         };
 
-        // Handle ICE connection state changes
         this.peerConnection.oniceconnectionstatechange = () => {
-            this.updateConnectionStatus();
+            console.log('ICE connection state:', this.peerConnection.iceConnectionState);
+            this.updateStatus(`ICE connection state: ${this.peerConnection.iceConnectionState}`, 'info');
+            if (this.peerConnection.iceConnectionState === 'disconnected' || this.peerConnection.iceConnectionState === 'failed') {
+                this.updateStatus('WebRTC connection lost. Attempting to reconnect...', 'error');
+                // Implement reconnection logic or prompt user to restart call
+            } else if (this.peerConnection.iceConnectionState === 'connected') {
+                this.updateStatus('WebRTC connection established.', 'success');
+            }
         };
 
-        // Handle peer connection state changes
         this.peerConnection.onconnectionstatechange = () => {
-            this.updateConnectionStatus();
-        };
-
-        // Handle remote stream
-        this.peerConnection.ontrack = (event) => {
-            if (event.streams && event.streams[0]) {
-                this.remoteStream = event.streams[0];
-                this.remoteVideo.srcObject = this.remoteStream;
-                // Hide placeholder and show video
-                this.remoteVideoPlaceholder.style.display = 'none';
-                this.updateStatus('Remote video stream connected!', 'success');
-            }
-        };
-
-        // Handle negotiation needed
-        this.peerConnection.onnegotiationneeded = async () => {
-            if (this.isInitiator && this.remotePeerId && this.socket && this.socket.connected) {
-                await this.createOffer();
+            console.log('Peer connection state:', this.peerConnection.connectionState);
+            this.updateStatus(`Peer connection state: ${this.peerConnection.connectionState}`, 'info');
+            if (this.peerConnection.connectionState === 'disconnected' || this.peerConnection.connectionState === 'failed') {
+                this.updateStatus('Peer connection lost. Call may have ended.', 'error');
+            } else if (this.peerConnection.connectionState === 'connected') {
+                this.updateStatus('Peer connection established. Call active.', 'success');
             }
         };
     }
 
-    updateConnectionStatus() {
-        const iceState = this.peerConnection?.iceConnectionState || 'not-started';
-        
-        // Update UI based on connection state
-        if (iceState === 'connected' || iceState === 'completed') {
-            this.updateStatus('WebRTC connection established successfully!', 'success');
-        } else if (iceState === 'disconnected') {
-            this.updateStatus('WebRTC connection lost, attempting to reconnect...', 'info');
-        } else if (iceState === 'failed') {
-            this.updateStatus('WebRTC connection failed', 'error');
-        } else if (iceState === 'checking') {
-            this.updateStatus('Establishing WebRTC connection...', 'info');
-        }
-    }
-
-    // Helper function to add local tracks to peer connection
     addLocalTracksToConnection() {
-        if (!this.peerConnection || !this.localStream) {
-            return;
+        if (this.localStream && this.peerConnection) {
+            this.localStream.getTracks().forEach(track => {
+                // Check if track is already added to avoid errors
+                const existingSenders = this.peerConnection.getSenders();
+                const trackAlreadyAdded = existingSenders.some(sender => sender.track === track);
+                if (!trackAlreadyAdded) {
+                    this.peerConnection.addTrack(track, this.localStream);
+                    console.log('Added local track to peer connection:', track.kind);
+                } else {
+                    console.log('Track already added:', track.kind);
+                }
+            });
         }
-
-        // Check if tracks are already added
-        const senders = this.peerConnection.getSenders();
-        const hasVideoSender = senders.some(sender => sender.track?.kind === 'video');
-        const hasAudioSender = senders.some(sender => sender.track?.kind === 'audio');
-
-        if (hasVideoSender && hasAudioSender) {
-            return;
-        }
-
-        this.localStream.getTracks().forEach((track) => {
-            const existingSender = senders.find(sender => sender.track?.kind === track.kind);
-            if (!existingSender) {
-                this.peerConnection.addTrack(track, this.localStream);
-            }
-        });
     }
 
-    // WebRTC Signaling Methods
     async createOffer() {
         try {
-            if (!this.peerConnection || !this.remotePeerId) {
+            if (!this.peerConnection) {
+                this.updateStatus('Peer connection not initialized. Cannot create offer.', 'error');
                 return;
             }
-            
-            const offer = await this.peerConnection.createOffer({
-                offerToReceiveAudio: true,
-                offerToReceiveVideo: true
-            });
-            
+            if (!this.remotePeerId) {
+                this.updateStatus('No remote peer ID to send offer to.', 'warning');
+                return;
+            }
+
+            const offer = await this.peerConnection.createOffer();
             await this.peerConnection.setLocalDescription(offer);
             
+            console.log('Sending offer:', offer);
             this.socket.emit('webrtc-offer', {
-                offer: offer,
                 to: this.remotePeerId,
-                from: this.socket.id
+                offer: offer
             });
-            
-            this.updateStatus('WebRTC offer sent to remote peer', 'info');
+            this.updateStatus('Offer sent to remote peer.', 'info');
         } catch (error) {
             console.error('Error creating offer:', error);
             this.updateStatus(`Failed to create offer: ${error.message}`, 'error');
         }
     }
 
-    async handleOffer(offer, senderId) {
+    async handleOffer(offer, fromSid) {
         try {
-            // Ensure we have local media first
-            if (!this.localStream) {
-                this.updateStatus('Getting camera for incoming call...', 'info');
-                
-                try {
-                    // Get user media with same constraints as startCall
-                    let mediaConstraints = {
-                        video: {
-                            width: { ideal: 1280 },
-                            height: { ideal: 720 },
-                            frameRate: { ideal: 30 }
-                        },
-                        audio: {
-                            echoCancellation: true,
-                            noiseSuppression: true,
-                            autoGainControl: true
-                        }
-                    };
-
-                    try {
-                        this.localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-                    } catch (constraintError) {
-                        mediaConstraints = { video: true, audio: true };
-                        this.localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-                    }
-                    
-                    // Display local video
-                    this.localVideo.srcObject = this.localStream;
-                    
-                } catch (error) {
-                    console.error('Failed to get media for incoming call:', error);
-                    this.updateStatus('Failed to access camera for incoming call', 'error');
-                    return;
+            this.remotePeerId = fromSid; // Set remote peer ID from the offer sender
+            if (!this.peerConnection) {
+                // If peer connection not yet initialized (e.g., if this client is not initiator)
+                // Ensure local stream is available before initializing peer connection
+                if (!this.localStream) {
+                    await this.startCall(); // This will initialize local stream and peer connection
+                } else {
+                    await this.initializePeerConnection();
                 }
             }
-            
-            // Ensure we have a peer connection
-            if (!this.peerConnection) {
-                await this.initializePeerConnection();
-            } else {
-                // If peer connection exists, make sure our local tracks are added
-                this.addLocalTracksToConnection();
-            }
-            
-            await this.peerConnection.setRemoteDescription(offer);
-            
+
+            await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            console.log('Received offer, creating answer...');
+            this.updateStatus('Received offer, creating answer...', 'info');
+
             const answer = await this.peerConnection.createAnswer();
             await this.peerConnection.setLocalDescription(answer);
             
+            console.log('Sending answer:', answer);
             this.socket.emit('webrtc-answer', {
-                answer: answer,
-                to: senderId,
-                from: this.socket.id
+                to: this.remotePeerId,
+                answer: answer
             });
-            
-            this.updateStatus('WebRTC answer sent to remote peer', 'success');
+            this.updateStatus('Answer sent to remote peer.', 'success');
         } catch (error) {
             console.error('Error handling offer:', error);
             this.updateStatus(`Failed to handle offer: ${error.message}`, 'error');
@@ -602,14 +560,9 @@ class InterludeApp {
 
     async handleAnswer(answer) {
         try {
-            // Ensure we have a peer connection
-            if (!this.peerConnection) {
-                this.updateStatus('Error: No peer connection for answer', 'error');
-                return;
-            }
-            
-            await this.peerConnection.setRemoteDescription(answer);
-            this.updateStatus('WebRTC connection established!', 'success');
+            await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+            console.log('Received answer.');
+            this.updateStatus('Received answer. WebRTC connection established.', 'success');
         } catch (error) {
             console.error('Error handling answer:', error);
             this.updateStatus(`Failed to handle answer: ${error.message}`, 'error');
@@ -618,296 +571,178 @@ class InterludeApp {
 
     async handleIceCandidate(candidate) {
         try {
-            // Ensure we have a peer connection
-            if (!this.peerConnection) {
-                await this.initializePeerConnection();
+            if (!this.peerConnection || !candidate) {
+                console.warn('Peer connection not ready or candidate is null.', candidate);
+                return;
             }
-            
-            await this.peerConnection.addIceCandidate(candidate);
+            await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            console.log('Added ICE candidate.');
         } catch (error) {
             console.error('Error adding ICE candidate:', error);
+            // Ignore "Failed to set remote answer sdp: Called in wrong state" errors
+            // These can happen if candidate arrives before remote description is set
+            if (!error.message.includes('wrong state')) {
+                this.updateStatus(`Failed to add ICE candidate: ${error.message}`, 'error');
+            }
         }
     }
 
     handleUserLeft(userId) {
-        this.updateStatus('Remote user disconnected', 'info');
-        
-        // Stop audio streaming since conversation is interrupted
-        this.stopAudioStreaming();
-        
-        // Clear remote video
-        if (this.remoteVideo) {
+        this.updateStatus(`User ${userId} left the room.`, 'info');
+        if (this.remotePeerId === userId) {
+            this.remotePeerId = null;
             this.remoteVideo.srcObject = null;
+            this.remoteVideoPlaceholder.style.display = 'block'; // Show placeholder
+            this.remoteVideo.style.display = 'none'; // Hide remote video
+            this.updateStatus('Remote user disconnected. Call ended.', 'info');
+            this.endCall(); // Automatically end call if remote user leaves
         }
-        
-        // Reset remote peer info
-        this.remotePeerId = null;
-        this.isInitiator = false;
-        
-        // Show room selection modal again
-        document.getElementById('roomSelection').style.display = 'flex';
-        
-        // Show remote video placeholder
-        if (this.remoteVideoPlaceholder) {
-            this.remoteVideoPlaceholder.style.display = 'flex';
-        }
-        
-        // Reset communication status
-        this.speechToAslStatus.textContent = 'Ready';
-        this.aslToSpeechStatus.textContent = 'Ready';
     }
 
-    startAslRecognition() {
-        // ASL recognition initialization
-        this.aslToSpeechStatus.textContent = 'Listening for signs...';
+    updateStatus(message, type = 'info', clear = false) {
+        if (clear) {
+            this.statusMessage.innerHTML = ''; // Clear previous messages
+        }
+        const p = document.createElement('p');
+        p.className = `status-message ${type}`;
+        p.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        this.statusMessage.prepend(p); // Add new messages to the top
+        // Keep only the last 5 messages
+        while (this.statusMessage.children.length > 5) {
+            this.statusMessage.removeChild(this.statusMessage.lastChild);
+        }
     }
 
+    // --- Speech-to-Text (STT) Integration ---
     startSpeechProcessing() {
         if (!this.localStream) {
-            console.warn('[STT] No local stream available.');
-            this.updateStatus('No audio stream available for speech processing', 'error');
+            this.updateStatus('No local stream available for speech processing.', 'error');
             return;
         }
-    
+
+        if (this.isAudioStreaming) {
+            this.updateStatus('Audio streaming already active.', 'info');
+            return;
+        }
+
         try {
-            console.log('[STT] Starting speech processing...');
-            
-            if (!window.MediaRecorder) {
-                throw new Error('MediaRecorder not supported by this browser');
-            }
-    
             const audioTrack = this.localStream.getAudioTracks()[0];
             if (!audioTrack) {
-                throw new Error('No audio track found in stream');
+                this.updateStatus('No audio track found in local stream.', 'error');
+                return;
             }
-    
-            const audioStream = new MediaStream([audioTrack]);
-            const options = {
-                mimeType: 'audio/webm;codecs=opus',
-                audioBitsPerSecond: 128000
-            };
-    
-            if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-                console.warn('[STT] Opus not supported. Falling back...');
-                if (MediaRecorder.isTypeSupported('audio/webm')) {
-                    options.mimeType = 'audio/webm';
-                } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-                    options.mimeType = 'audio/mp4';
-                } else {
-                    console.warn('[STT] No supported mimeType found. Using default.');
-                    delete options.mimeType;
-                }
+
+            console.log('Audio track state:', audioTrack.readyState, 'enabled:', audioTrack.enabled);
+            if (audioTrack.readyState !== 'live' || !audioTrack.enabled) {
+                this.updateStatus('Audio track is not live or enabled. Cannot start speech processing.', 'error');
+                return;
             }
-    
-            this.mediaRecorder = new MediaRecorder(audioStream, options);
-            this.audioChunks = [];
-    
+
+            // Create MediaRecorder from the audio track
+            // Use 'audio/webm; codecs=opus' for good compatibility and compression
+            this.mediaRecorder = new MediaRecorder(new MediaStream([audioTrack]), {
+                mimeType: 'audio/webm; codecs=opus'
+            });
+
             this.mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
-                    console.log(`[STT] Audio chunk captured: size=${event.data.size}`);
-                    this.handleAudioChunk(event.data);
+                    console.log(`Sending audio chunk: ${event.data.size} bytes`); // Log chunk size
+                    // Send audio chunk to backend
+                    this.socket.emit('send_audio_chunk', event.data);
+                } else {
+                    console.warn('Empty audio chunk received from MediaRecorder.');
                 }
             };
-    
-            this.mediaRecorder.onstart = () => {
-                console.log('[STT] MediaRecorder started');
-                this.isAudioStreaming = true;
-                this.speechToAslStatus.textContent = 'Initializing speech recognition...';
-                if (this.socket && this.socket.connected) {
-                    console.log('[STT] Notifying backend to start stream...');
-                    this.socket.emit('start-audio-stream', {
-                        mimeType: this.mediaRecorder.mimeType,
-                        timestamp: Date.now()
-                    });
-                }
-            };
-    
+
             this.mediaRecorder.onstop = () => {
-                console.log('[STT] MediaRecorder stopped');
+                console.log('MediaRecorder stopped.');
+                this.updateStatus('MediaRecorder stopped.', 'info');
                 this.isAudioStreaming = false;
-                this.speechToAslStatus.textContent = 'Speech processing stopped';
-                if (this.socket && this.socket.connected) {
-                    console.log('[STT] Notifying backend to stop stream...');
-                    this.socket.emit('stop-audio-stream', {
-                        timestamp: Date.now()
-                    });
-                }
+                this.speechToAslStatus.textContent = 'Speech processing stopped.';
+                this.audioChunks = []; // Clear audio chunks on stop
+                // Inform backend that audio stream has ended
+                this.socket.emit('end_audio_stream');
             };
-    
+
             this.mediaRecorder.onerror = (event) => {
-                console.error('[STT] MediaRecorder error:', event.error);
-                this.updateStatus(`Audio recording error: ${event.error.name}`, 'error');
-                this.speechToAslStatus.textContent = 'Speech processing error';
+                console.error('MediaRecorder error:', event.error);
+                this.updateStatus(`MediaRecorder error: ${event.error.name}`, 'error');
+                this.isAudioStreaming = false;
+                this.speechToAslStatus.textContent = 'Speech processing error.';
+                // Stop streaming on error
                 this.stopAudioStreaming();
             };
-    
-            this.mediaRecorder.start(1000);
-            console.log('[STT] MediaRecorder started with interval: 1000ms');
-            this.updateStatus('Started audio capture for speech recognition', 'success');
-    
-        } catch (error) {
-            console.error('[STT] Error starting speech processing:', error);
-            this.updateStatus(`Failed to start speech processing: ${error.message}`, 'error');
-            this.speechToAslStatus.textContent = 'Speech processing failed';
-        }
-    }
 
-    async handleAudioChunk(audioBlob) {
-        if (!this.isAudioStreaming || !this.socket || !this.socket.connected) {
-            console.warn('[STT] Skipping chunk: streaming inactive or socket disconnected');
-            return;
-        }
-    
-        try {
-            console.log(`[STT] Preparing audio chunk of size ${audioBlob.size} for sending`);
-            const reader = new FileReader();
-            reader.onload = () => {
-                const base64Data = reader.result.split(',')[1];
-                console.log('[STT] Sending audio chunk to backend...');
-                this.socket.emit('audio-chunk', {
-                    audioData: base64Data,
-                    timestamp: Date.now(),
-                    size: audioBlob.size,
-                    type: audioBlob.type
-                });
-            };
-    
-            reader.onerror = (error) => {
-                console.error('[STT] FileReader error while reading blob:', error);
-                this.updateStatus('Error processing audio chunk', 'error');
-            };
-    
-            reader.readAsDataURL(audioBlob);
-    
+            // Inform backend that audio stream is starting
+            this.socket.emit('start_audio_stream');
+            
+            // Start recording and send data in chunks every 500ms
+            this.mediaRecorder.start(500); // Changed from 100 to 500ms
+            this.isAudioStreaming = true;
+            this.speechToAslStatus.textContent = 'Processing speech...';
+            this.updateStatus('Audio streaming started for speech recognition', 'success');
+
         } catch (error) {
-            console.error('[STT] Error handling audio chunk:', error);
-            this.updateStatus('Error processing audio for speech recognition', 'error');
+            console.error('Error starting speech processing:', error);
+            this.updateStatus(`Failed to start speech processing: ${error.message}`, 'error');
+            this.isAudioStreaming = false;
         }
     }
 
     stopAudioStreaming() {
-        if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
-            try {
-                console.log('[STT] Stopping MediaRecorder...');
-                this.mediaRecorder.stop();
-            } catch (error) {
-                console.error('[STT] Error stopping MediaRecorder:', error);
-            }
+        if (this.isAudioStreaming && this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+            console.log('Stopping MediaRecorder...');
+            this.mediaRecorder.stop();
+            this.isAudioStreaming = false;
+            // The onstop event handler will emit 'end_audio_stream' to the backend
         } else {
-            console.warn('[STT] No active MediaRecorder to stop.');
-        }
-    
-        // Clean up
-        this.mediaRecorder = null;
-        this.isAudioStreaming = false;
-        this.audioChunks = [];
-        this.speechToAslStatus.textContent = 'Ready';
-        console.log('[STT] Audio streaming stopped and cleaned up.');
-    }
-
-    updateStatus(message, type = 'info', showSpinner = false, autoHide = true) {
-        // Enhanced status message with optional loading spinner
-        const statusContent = this.statusMessage.querySelector('.status-content');
-        if (statusContent) {
-            // Clear existing content
-            statusContent.innerHTML = '';
-            
-            // Add spinner if requested
-            if (showSpinner || (type === 'info' && message.includes('...'))) {
-                const spinner = document.createElement('div');
-                spinner.className = `spinner ${type}`;
-                statusContent.appendChild(spinner);
-            }
-            
-            // Add message text
-            const textSpan = document.createElement('span');
-            textSpan.textContent = message;
-            statusContent.appendChild(textSpan);
-            
-            // Add loading dots for ongoing operations
-            if (message.includes('...')) {
-                textSpan.className = 'loading-dots';
-            }
-        }
-        
-        // Update status message classes with enhanced animations
-        this.statusMessage.className = `status-message ${type} show`;
-        
-        // Enhanced auto-hide behavior
-        if (autoHide) {
-            const hideDelay = type === 'error' ? 7000 : type === 'success' ? 4000 : 5000;
-            setTimeout(() => {
-                this.statusMessage.classList.remove('show');
-            }, hideDelay);
-        }
-        
-        // Update connection indicator based on message type
-        this.updateConnectionIndicator(type, message);
-    }
-    
-    updateConnectionIndicator(type, message) {
-        // Enhanced connection status indicators
-        if (message.includes('Connected to signaling server') || message.includes('WebRTC connection established')) {
-            this.connectionStatus.className = 'status-dot connected';
-            this.connectionText.textContent = 'Connected';
-        } else if (message.includes('Connecting') || message.includes('Starting') || message.includes('Getting')) {
-            this.connectionStatus.className = 'status-dot connecting';
-            this.connectionText.textContent = 'Connecting...';
-        } else if (type === 'error' && (message.includes('failed') || message.includes('error'))) {
-            this.connectionStatus.className = 'status-dot error';
-            this.connectionText.textContent = 'Connection Error';
-        } else if (message.includes('Disconnected')) {
-            this.connectionStatus.className = 'status-dot';
-            this.connectionText.textContent = 'Disconnected';
+            console.log('MediaRecorder not active or already stopped.');
         }
     }
 
+    // --- ASL Recognition Integration (Placeholder) ---
+    startAslRecognition() {
+        this.aslToSpeechStatus.textContent = 'ASL recognition active (placeholder)';
+        this.updateStatus('ASL recognition started (placeholder)', 'info');
+    }
+
+    stopAslRecognition() {
+        this.aslToSpeechStatus.textContent = 'ASL recognition inactive (placeholder)';
+        this.updateStatus('ASL recognition stopped (placeholder)', 'info');
+    }
+
+    // --- UI Initialization and Settings ---
     initializeUI() {
-        // Set initial connection state
-        this.connectionText.textContent = 'Connecting...';
-        
-        // Set initial button states
-        this.toggleVideoBtn.classList.add('active');
-        this.toggleAudioBtn.classList.add('active');
-        
-        // Initialize modal display
-        document.getElementById('roomSelection').style.display = 'flex';
-        
-        // Load saved settings
+        // Apply default settings or load from local storage
         this.loadSettings();
+        // Set initial button states based on enabled flags
+        this.toggleVideoBtn.classList.toggle('active', this.isVideoEnabled);
+        this.toggleAudioBtn.classList.toggle('active', this.isAudioEnabled);
+        this.toggleVideoBtn.title = this.isVideoEnabled ? 'Turn off video' : 'Turn on video';
+        this.toggleAudioBtn.title = this.isAudioEnabled ? 'Mute audio' : 'Unmute audio';
+
+        // Set default room ID
+        const defaultRoomId = 'interlude-room'; // You can make this dynamic or user-configurable
+        this.roomIdInput.value = defaultRoomId;
     }
 
     addToggleSwitchListeners() {
-        // Make toggle sliders clickable for better UX
-        const toggleSwitches = document.querySelectorAll('.toggle-switch');
-        
-        toggleSwitches.forEach(toggleSwitch => {
-            const checkbox = toggleSwitch.querySelector('input[type="checkbox"]');
-            const slider = toggleSwitch.querySelector('.toggle-slider');
-            const label = toggleSwitch.querySelector('.toggle-label');
-            
-            // Make slider and label clickable
-            [slider, label].forEach(element => {
-                if (element) {
-                    element.addEventListener('click', (e) => {
-                        e.preventDefault();
-                        checkbox.checked = !checkbox.checked;
-                        
-                        // Trigger change event manually
-                        const changeEvent = new Event('change', { bubbles: true });
-                        checkbox.dispatchEvent(changeEvent);
-                    });
-                    
-                    // Add cursor pointer
-                    element.style.cursor = 'pointer';
+        // Make the entire toggle switch area clickable for better UX
+        const themeToggleContainer = document.querySelector('.toggle-switch-container label[for="themeToggle"]');
+        if (themeToggleContainer) {
+            themeToggleContainer.addEventListener('click', (e) => {
+                // Prevent default label click if the input itself is clicked, to avoid double toggling
+                if (e.target !== this.themeToggle) {
+                    this.themeToggle.checked = !this.themeToggle.checked;
+                    this.toggleTheme();
                 }
             });
-        });
+        }
     }
 
-    // Settings functionality
     openSettings() {
-        this.settingsModal.style.display = 'flex';
+        this.loadSettings(); // Reload settings to ensure latest are displayed
+        this.settingsModal.style.display = 'flex'; // Use flex to center
     }
 
     closeSettings() {
@@ -917,38 +752,38 @@ class InterludeApp {
     saveSettings() {
         const settings = {
             theme: this.themeToggle.checked ? 'dark' : 'light',
-            username: this.usernameInput.value || 'You',
+            username: this.usernameInput.value.trim(),
             videoQuality: this.videoQualitySelect.value,
             defaultMute: this.defaultMuteToggle.checked,
-            defaultVideoOff: this.defaultVideoOffToggle.checked
+            defaultVideoOff: this.defaultVideoOffToggle.checked,
         };
-
-        // Save to localStorage
         localStorage.setItem('interludeSettings', JSON.stringify(settings));
-        
-        // Apply settings immediately
         this.applySettings(settings);
-        
-        // Show success message
-        this.updateStatus('Settings saved successfully!', 'success');
-        
-        // Close modal
         this.closeSettings();
+        this.updateStatus('Settings saved and applied.', 'success');
     }
 
     loadSettings() {
         const savedSettings = localStorage.getItem('interludeSettings');
+        let settings = {};
         if (savedSettings) {
-            const settings = JSON.parse(savedSettings);
-            this.applySettings(settings);
-            
-            // Update form values
-            this.themeToggle.checked = settings.theme === 'dark';
-            this.usernameInput.value = settings.username || 'You';
-            this.videoQualitySelect.value = settings.videoQuality || '720p';
-            this.defaultMuteToggle.checked = settings.defaultMute || false;
-            this.defaultVideoOffToggle.checked = settings.defaultVideoOff || false;
+            try {
+                settings = JSON.parse(savedSettings);
+            } catch (e) {
+                console.error('Error parsing saved settings:', e);
+                localStorage.removeItem('interludeSettings'); // Clear corrupt settings
+            }
         }
+
+        // Apply settings immediately
+        this.applySettings(settings);
+
+        // Update form values
+        this.themeToggle.checked = settings.theme === 'dark';
+        this.usernameInput.value = settings.username || 'You';
+        this.videoQualitySelect.value = settings.videoQuality || '720p';
+        this.defaultMuteToggle.checked = settings.defaultMute || false;
+        this.defaultVideoOffToggle.checked = settings.defaultVideoOff || false;
     }
 
     applySettings(settings) {
@@ -987,4 +822,4 @@ document.addEventListener('DOMContentLoaded', () => {
 // Export for potential module usage
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = InterludeApp;
-} 
+}
