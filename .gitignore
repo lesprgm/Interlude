@@ -24,3 +24,6 @@ node_modules/
 dist/
 build/
 genai-asl-avatar-generator/
+
+
+key/
