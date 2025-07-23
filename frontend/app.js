@@ -92,7 +92,7 @@ class InterludeApp {
     initializeSocket() {
         try {
             // Connect to the backend signaling server
-            this.socket = io('http://localhost:8000');
+            this.socket = io('http://34.61.230.193:8000');
             
             // Socket event handlers
             this.socket.on('connect', () => {
