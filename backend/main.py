@@ -4,9 +4,10 @@ from fastapi.responses import HTMLResponse
 import socketio
 import asyncio
 import logging
+# Import SpeechAsyncClient for asynchronous operations
 from google.cloud import speech_v1p1beta1 as speech
-# from google.oauth2 import service_account # Not needed if GOOGLE_APPLICATION_CREDENTIALS env var is set
-# import base64 # No longer needed as audio is handled as binary directly
+from google.cloud.speech_v1p1beta1 import SpeechAsyncClient # Import the async client
+from asyncio import Queue # Import Queue
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -57,17 +58,18 @@ rooms = {}
 users = {}
 
 # --- Google Cloud Speech-to-Text Setup ---
-speech_client = speech.SpeechClient()
+# Instantiate the asynchronous SpeechClient
+speech_client = SpeechAsyncClient()
 
 # Dictionary to hold active STT streaming requests per SID
-# Each entry will be a tuple: (stream_generator, response_iterator)
+# Each entry will be a tuple: (audio_queue, response_iterator)
 active_stt_streams = {}
 
 # STT configuration (adjust as needed for your audio)
 # This assumes 16000 Hz, mono, LINEAR16 (PCM) audio
 STT_CONFIG = speech.RecognitionConfig(
-    encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-    sample_rate_hertz=16000,
+    encoding=speech.RecognitionConfig.AudioEncoding.WEBM_OPUS, # <<< CHANGED: Expect WebM/Opus encoding
+    sample_rate_hertz=48000, # <<< ADJUSTED: Opus typically uses 48000 Hz sample rate
     language_code="en-US",
     enable_automatic_punctuation=True,
 )
@@ -75,6 +77,30 @@ STREAMING_CONFIG = speech.StreamingRecognitionConfig(
     config=STT_CONFIG,
     interim_results=True, # Essential for real-time updates
 )
+
+# --- Async Generator for STT Audio Input ---
+async def generate_audio_requests(audio_queue: Queue, streaming_config: speech.StreamingRecognitionConfig):
+    """
+    An async generator that yields StreamingRecognizeRequest objects.
+    It sends the streaming_config as the first request, then reads audio chunks
+    from an asyncio.Queue for subsequent requests.
+    """
+    # Send the configuration as the first request
+    yield speech.StreamingRecognizeRequest(streaming_config=streaming_config)
+
+    while True:
+        try:
+            # Get audio chunk from the queue
+            chunk = await audio_queue.get()
+            if chunk is None: # Signal to close the stream
+                break
+            yield speech.StreamingRecognizeRequest(audio_content=chunk)
+        except asyncio.CancelledError:
+            logger.info("Audio request generator cancelled.")
+            break
+        except Exception as e:
+            logger.error(f"Error in audio request generator: {e}", exc_info=True)
+            break
 
 # --- Socket.IO Event Handlers ---
 @sio.event
@@ -92,8 +118,8 @@ async def disconnect(sid, data=None):
     logger.info(f"Disconnect: {sid}")
     # Close STT stream if active
     if sid in active_stt_streams:
-        # Close the generator to signal end of stream to GCP
-        active_stt_streams[sid][0].close()
+        # Put None into the queue to signal the generator to stop
+        await active_stt_streams[sid][0].put(None) 
         del active_stt_streams[sid]
         logger.info(f"Closed STT stream for {sid}")
 
@@ -148,78 +174,61 @@ async def join_room(sid, data):
     elif len(room) > 2:
         await sio.emit('room-full', room=sid)
 
-# --- STT Audio Streaming Event Handlers (Consolidated and Corrected) ---
-@sio.on('start_audio_stream') # Note: Event name is 'start_audio_stream' (snake_case)
-async def start_audio_stream(sid, data=None): # data is optional, might contain audio config
-    logger.info(f"Starting audio stream for {sid}")
+# --- STT Audio Streaming Event Handlers ---
+@sio.on('start_audio_stream')
+async def start_audio_stream(sid, data=None):
+    logger.info(f"Starting audio stream for {sid} (Version: 2025-07-23_17:00_OpusConfig)") # Updated version check
     if sid in active_stt_streams:
         logger.warning(f"STT stream already active for {sid}, closing existing one.")
-        # Close the generator to signal end of stream to GCP
-        active_stt_streams[sid][0].close() 
+        await active_stt_streams[sid][0].put(None) # Signal old generator to stop
         del active_stt_streams[sid]
 
-    # Create a new audio content generator for this session
-    # This generator will yield AudioContent objects as chunks come in
-    audio_generator = (speech.StreamingRecognizeRequest(audio_content=chunk) for chunk in iter(lambda: None, None))
+    # Create a new Queue for this session's audio chunks
+    audio_queue = Queue()
     
-    # Start the streaming recognition call
-    responses = speech_client.streaming_recognize(STREAMING_CONFIG, audio_generator)
+    # Create the async generator that will read from the queue and send config first
+    audio_requests_generator = generate_audio_requests(audio_queue, STREAMING_CONFIG)
+
+    # Start the streaming recognition call using the async client
+    responses = await speech_client.streaming_recognize(requests=audio_requests_generator)
     
-    active_stt_streams[sid] = (audio_generator, responses) # Store generator and iterator
+    # Store the audio_queue and responses iterator
+    active_stt_streams[sid] = (audio_queue, responses)
 
     # Start a background task to consume responses from GCP STT
     asyncio.create_task(handle_stt_responses(sid, responses))
     logger.info(f"STT streaming recognition initiated for {sid}")
 
-@sio.on('send_audio_chunk') # Note: Event name is 'send_audio_chunk' (snake_case)
+@sio.on('send_audio_chunk')
 async def send_audio_chunk(sid, audio_data):
     if sid not in active_stt_streams:
         logger.warning(f"Received audio chunk for {sid} but no active STT stream. Ignoring.")
         return
     
     try:
-        # Send the audio data to the generator.
-        # The `_write` method is internal but used for feeding data to gRPC streams.
-        active_stt_streams[sid][0]._write(audio_data)
+        # Put the audio data into the queue
+        await active_stt_streams[sid][0].put(audio_data)
         # logger.debug(f"Sent {len(audio_data)} bytes for {sid}") # Uncomment for detailed chunk logging
     except Exception as e:
         logger.error(f"Error sending audio chunk for {sid}: {e}", exc_info=True)
         # Consider closing stream if error occurs
         if sid in active_stt_streams:
-            active_stt_streams[sid][0].close()
+            await active_stt_streams[sid][0].put(None) # Signal generator to stop
             del active_stt_streams[sid]
 
-@sio.on('end_audio_stream') # Note: Event name is 'end_audio_stream' (snake_case)
-async def end_audio_stream(sid, data=None): # data is optional
+@sio.on('end_audio_stream')
+async def end_audio_stream(sid, data=None):
     logger.info(f"Ending audio stream for {sid}")
     if sid in active_stt_streams:
-        active_stt_streams[sid][0].close() # Signal end of stream to GCP
+        await active_stt_streams[sid][0].put(None) # Signal the generator to stop
         del active_stt_streams[sid]
         logger.info(f"STT stream for {sid} explicitly ended.")
 
 async def handle_stt_responses(sid, responses):
     """Background task to process responses from GCP STT and relay to peer."""
     try:
-        user_info = users.get(sid)
-        if not user_info or not user_info['room']:
-            logger.warning(f"User {sid} not in a room, cannot relay transcript.")
-            return
-
-        room_id = user_info['room']
-        current_room_sids = rooms.get(room_id)
-
-        if not current_room_sids or len(current_room_sids) != 2:
-            logger.warning(f"Room {room_id} does not have exactly two users, cannot relay transcript for {sid}.")
-            return
-
-        # Find the other user in the room
-        other_user_sid = next(iter(s for s in current_room_sids if s != sid), None)
-
-        if not other_user_sid:
-            logger.warning(f"Could not find peer for {sid} in room {room_id}, cannot relay transcript.")
-            return
-
-        for response in responses:
+        # Use async for to iterate over the async responses iterator
+        async for response in responses: 
             if not response.results:
                 continue
 
@@ -229,19 +238,37 @@ async def handle_stt_responses(sid, responses):
 
             transcript = result.alternatives[0].transcript
             
-            if result.is_final:
-                logger.info(f"Final Transcript for {sid} (relaying to {other_user_sid}): {transcript}")
-                await sio.emit('transcribed_text', {'text': transcript, 'isFinal': True}, room=other_user_sid)
+            user_info = users.get(sid)
+            room_id = user_info['room'] if user_info else None
+            
+            other_user_sid = None
+            # Check for exactly two users in the room before attempting to find the other user
+            if room_id and room_id in rooms and len(rooms[room_id]) == 2:
+                current_room_sids = rooms.get(room_id)
+                other_user_sid = next(iter(s for s in current_room_sids if s != sid), None)
+
+            if other_user_sid: # Only emit if there's a peer to send to
+                if result.is_final:
+                    logger.info(f"Final Transcript for {sid} (relaying to {other_user_sid}): {transcript}")
+                    await sio.emit('transcribed_text', {'text': transcript, 'isFinal': True}, room=other_user_sid)
+                else:
+                    logger.info(f"Partial Transcript for {sid} (relaying to {other_user_sid}): {transcript}")
+                    await sio.emit('transcribed_text', {'text': transcript, 'isFinal': False}, room=other_user_sid)
             else:
-                logger.info(f"Partial Transcript for {sid} (relaying to {other_user_sid}): {transcript}")
-                await sio.emit('transcribed_text', {'text': transcript, 'isFinal': False}, room=other_user_sid)
+                # Log that transcription is happening but not relayed yet
+                logger.info(f"Transcript for {sid} (not yet relayed): {transcript} (Room size: {len(rooms.get(room_id, [])) if room_id else 'N/A'})")
+
     except Exception as e:
         logger.error(f"Error processing STT responses for {sid}: {e}", exc_info=True)
-    finally:
+    finally: # This finally block is now for graceful task shutdown, not stream cleanup
+        # Ensure the audio queue is signaled to stop if the response handler exits unexpectedly
         if sid in active_stt_streams:
-            active_stt_streams[sid][0].close()
+            try:
+                await active_stt_streams[sid][0].put(None)
+            except Exception as q_e:
+                logger.warning(f"Error signaling audio queue to stop for {sid}: {q_e}")
             del active_stt_streams[sid]
-            logger.info(f"STT response handler for {sid} finished/cleaned up.")
+        logger.info(f"STT response handler for {sid} finished/cleaned up.")
 
 
 # WebRTC Signaling Events (Remain unchanged)
