@@ -664,94 +664,89 @@ class InterludeApp {
 
     startSpeechProcessing() {
         if (!this.localStream) {
+            console.warn('[STT] No local stream available.');
             this.updateStatus('No audio stream available for speech processing', 'error');
             return;
         }
-
+    
         try {
-            // Check if MediaRecorder is supported
+            console.log('[STT] Starting speech processing...');
+            
             if (!window.MediaRecorder) {
                 throw new Error('MediaRecorder not supported by this browser');
             }
-
-            // Get only the audio track for STT processing
+    
             const audioTrack = this.localStream.getAudioTracks()[0];
             if (!audioTrack) {
                 throw new Error('No audio track found in stream');
             }
-
-            // Create a new MediaStream with just the audio track
+    
             const audioStream = new MediaStream([audioTrack]);
-            
-            // Configure MediaRecorder for optimal STT processing
             const options = {
-                mimeType: 'audio/webm;codecs=opus', // Opus codec is efficient for speech
-                audioBitsPerSecond: 128000 // 128 kbps for good quality speech
+                mimeType: 'audio/webm;codecs=opus',
+                audioBitsPerSecond: 128000
             };
-
-            // Fallback MIME types if opus not supported
+    
             if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                console.warn('[STT] Opus not supported. Falling back...');
                 if (MediaRecorder.isTypeSupported('audio/webm')) {
                     options.mimeType = 'audio/webm';
                 } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
                     options.mimeType = 'audio/mp4';
                 } else {
-                    // Use default
+                    console.warn('[STT] No supported mimeType found. Using default.');
                     delete options.mimeType;
                 }
             }
-
-            // Initialize MediaRecorder
+    
             this.mediaRecorder = new MediaRecorder(audioStream, options);
             this.audioChunks = [];
-
-            // Set up MediaRecorder event handlers
+    
             this.mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
+                    console.log(`[STT] Audio chunk captured: size=${event.data.size}`);
                     this.handleAudioChunk(event.data);
                 }
             };
-
+    
             this.mediaRecorder.onstart = () => {
-                console.log('MediaRecorder started for STT');
+                console.log('[STT] MediaRecorder started');
                 this.isAudioStreaming = true;
                 this.speechToAslStatus.textContent = 'Initializing speech recognition...';
-                
-                // Notify backend to start audio streaming
                 if (this.socket && this.socket.connected) {
+                    console.log('[STT] Notifying backend to start stream...');
                     this.socket.emit('start-audio-stream', {
                         mimeType: this.mediaRecorder.mimeType,
                         timestamp: Date.now()
                     });
                 }
             };
-
+    
             this.mediaRecorder.onstop = () => {
-                console.log('MediaRecorder stopped for STT');
+                console.log('[STT] MediaRecorder stopped');
                 this.isAudioStreaming = false;
                 this.speechToAslStatus.textContent = 'Speech processing stopped';
-                
-                // Notify backend to stop audio streaming
                 if (this.socket && this.socket.connected) {
+                    console.log('[STT] Notifying backend to stop stream...');
                     this.socket.emit('stop-audio-stream', {
                         timestamp: Date.now()
                     });
                 }
             };
-
+    
             this.mediaRecorder.onerror = (event) => {
-                console.error('MediaRecorder error:', event.error);
+                console.error('[STT] MediaRecorder error:', event.error);
                 this.updateStatus(`Audio recording error: ${event.error.name}`, 'error');
                 this.speechToAslStatus.textContent = 'Speech processing error';
                 this.stopAudioStreaming();
             };
-
-            // Start recording in chunks (send data every 1 second for real-time STT)
+    
             this.mediaRecorder.start(1000);
+            console.log('[STT] MediaRecorder started with interval: 1000ms');
             this.updateStatus('Started audio capture for speech recognition', 'success');
-
+    
         } catch (error) {
-            console.error('Error starting speech processing:', error);
+            console.error('[STT] Error starting speech processing:', error);
             this.updateStatus(`Failed to start speech processing: ${error.message}`, 'error');
             this.speechToAslStatus.textContent = 'Speech processing failed';
         }
@@ -759,16 +754,16 @@ class InterludeApp {
 
     async handleAudioChunk(audioBlob) {
         if (!this.isAudioStreaming || !this.socket || !this.socket.connected) {
+            console.warn('[STT] Skipping chunk: streaming inactive or socket disconnected');
             return;
         }
-
+    
         try {
-            // Convert blob to base64 for transmission over Socket.IO
+            console.log(`[STT] Preparing audio chunk of size ${audioBlob.size} for sending`);
             const reader = new FileReader();
             reader.onload = () => {
-                const base64Data = reader.result.split(',')[1]; // Remove data:audio/webm;base64, prefix
-                
-                // Send audio chunk to backend
+                const base64Data = reader.result.split(',')[1];
+                console.log('[STT] Sending audio chunk to backend...');
                 this.socket.emit('audio-chunk', {
                     audioData: base64Data,
                     timestamp: Date.now(),
@@ -776,16 +771,16 @@ class InterludeApp {
                     type: audioBlob.type
                 });
             };
-            
+    
             reader.onerror = (error) => {
-                console.error('Error reading audio blob:', error);
+                console.error('[STT] FileReader error while reading blob:', error);
                 this.updateStatus('Error processing audio chunk', 'error');
             };
-            
+    
             reader.readAsDataURL(audioBlob);
-            
+    
         } catch (error) {
-            console.error('Error handling audio chunk:', error);
+            console.error('[STT] Error handling audio chunk:', error);
             this.updateStatus('Error processing audio for speech recognition', 'error');
         }
     }
@@ -793,17 +788,21 @@ class InterludeApp {
     stopAudioStreaming() {
         if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
             try {
+                console.log('[STT] Stopping MediaRecorder...');
                 this.mediaRecorder.stop();
             } catch (error) {
-                console.error('Error stopping MediaRecorder:', error);
+                console.error('[STT] Error stopping MediaRecorder:', error);
             }
+        } else {
+            console.warn('[STT] No active MediaRecorder to stop.');
         }
-        
+    
         // Clean up
         this.mediaRecorder = null;
         this.isAudioStreaming = false;
         this.audioChunks = [];
         this.speechToAslStatus.textContent = 'Ready';
+        console.log('[STT] Audio streaming stopped and cleaned up.');
     }
 
     updateStatus(message, type = 'info', showSpinner = false, autoHide = true) {
