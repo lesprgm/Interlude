@@ -177,6 +177,21 @@ class InterludeApp {
                 this.stopAudioStreaming();
             });
 
+            // Real-time subtitle display handler
+            this.socket.on('subtitle', (data) => {
+                // data: { text: string, isFinal: boolean }
+                const subtitleDiv = document.getElementById('subtitleDisplay');
+                if (subtitleDiv && data && typeof data.text === 'string') {
+                    subtitleDiv.textContent = data.text;
+                    // Optionally, add a class for final/partial
+                    if (data.isFinal) {
+                        subtitleDiv.classList.add('final');
+                    } else {
+                        subtitleDiv.classList.remove('final');
+                    }
+                }
+            });
+
         } catch (error) {
             console.error('Failed to initialize Socket.IO:', error);
             this.updateStatus('Failed to connect to signaling server', 'error');
