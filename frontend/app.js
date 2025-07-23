@@ -16,6 +16,11 @@ class InterludeApp {
         this.remotePeerId = null;
         this.isInitiator = false;
         
+        // Audio streaming for STT
+        this.mediaRecorder = null;
+        this.isAudioStreaming = false;
+        this.audioChunks = [];
+        
         // WebRTC Configuration with STUN servers
         this.rtcConfiguration = {
             iceServers: [
@@ -145,6 +150,33 @@ class InterludeApp {
                 this.updateStatus(`Connection error: ${error}`, 'error');
             });
 
+            // STT Audio Streaming Event Handlers
+            this.socket.on('audio-stream-started', (data) => {
+                if (data.status === 'success') {
+                    this.speechToAslStatus.textContent = 'Streaming audio for analysis...';
+                    this.updateStatus('Audio streaming started for speech recognition', 'success');
+                }
+            });
+
+            this.socket.on('audio-chunk-received', (data) => {
+                // Audio chunk processed by backend - could update UI here if needed
+            });
+
+            this.socket.on('audio-stream-stopped', (data) => {
+                if (data.status === 'success') {
+                    this.speechToAslStatus.textContent = 'Speech processing stopped';
+                    this.updateStatus('Audio streaming stopped', 'info');
+                }
+            });
+
+            this.socket.on('audio-stream-error', (data) => {
+                console.error('Audio streaming error:', data.error);
+                this.updateStatus(`Audio streaming error: ${data.error}`, 'error');
+                this.speechToAslStatus.textContent = 'Speech processing error';
+                // Stop streaming on error
+                this.stopAudioStreaming();
+            });
+
         } catch (error) {
             console.error('Failed to initialize Socket.IO:', error);
             this.updateStatus('Failed to connect to signaling server', 'error');
@@ -270,6 +302,9 @@ class InterludeApp {
 
     endCall() {
         try {
+            // Stop audio streaming for STT
+            this.stopAudioStreaming();
+            
             // Stop all media streams
             if (this.localStream) {
                 this.localStream.getTracks().forEach(track => track.stop());
@@ -333,9 +368,19 @@ class InterludeApp {
                 if (this.isAudioEnabled) {
                     this.toggleAudioBtn.classList.add('active');
                     this.toggleAudioBtn.title = 'Mute audio';
+                    
+                    // Resume audio streaming if call is active
+                    if (this.isCallActive && !this.isAudioStreaming) {
+                        this.startSpeechProcessing();
+                    }
                 } else {
                     this.toggleAudioBtn.classList.remove('active');
                     this.toggleAudioBtn.title = 'Unmute audio';
+                    
+                    // Stop audio streaming when muted
+                    if (this.isAudioStreaming) {
+                        this.stopAudioStreaming();
+                    }
                 }
                 
                 this.updateStatus(this.isAudioEnabled ? 'Audio enabled' : 'Audio disabled', 'info');
@@ -569,6 +614,9 @@ class InterludeApp {
     handleUserLeft(userId) {
         this.updateStatus('Remote user disconnected', 'info');
         
+        // Stop audio streaming since conversation is interrupted
+        this.stopAudioStreaming();
+        
         // Clear remote video
         if (this.remoteVideo) {
             this.remoteVideo.srcObject = null;
@@ -586,11 +634,9 @@ class InterludeApp {
             this.remoteVideoPlaceholder.style.display = 'flex';
         }
         
-        // Close peer connection
-        if (this.peerConnection) {
-            this.peerConnection.close();
-            this.peerConnection = null;
-        }
+        // Reset communication status
+        this.speechToAslStatus.textContent = 'Ready';
+        this.aslToSpeechStatus.textContent = 'Ready';
     }
 
     startAslRecognition() {
@@ -599,8 +645,147 @@ class InterludeApp {
     }
 
     startSpeechProcessing() {
-        // Speech-to-text and ASL avatar generation
-        this.speechToAslStatus.textContent = 'Listening for speech...';
+        if (!this.localStream) {
+            this.updateStatus('No audio stream available for speech processing', 'error');
+            return;
+        }
+
+        try {
+            // Check if MediaRecorder is supported
+            if (!window.MediaRecorder) {
+                throw new Error('MediaRecorder not supported by this browser');
+            }
+
+            // Get only the audio track for STT processing
+            const audioTrack = this.localStream.getAudioTracks()[0];
+            if (!audioTrack) {
+                throw new Error('No audio track found in stream');
+            }
+
+            // Create a new MediaStream with just the audio track
+            const audioStream = new MediaStream([audioTrack]);
+            
+            // Configure MediaRecorder for optimal STT processing
+            const options = {
+                mimeType: 'audio/webm;codecs=opus', // Opus codec is efficient for speech
+                audioBitsPerSecond: 128000 // 128 kbps for good quality speech
+            };
+
+            // Fallback MIME types if opus not supported
+            if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                if (MediaRecorder.isTypeSupported('audio/webm')) {
+                    options.mimeType = 'audio/webm';
+                } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+                    options.mimeType = 'audio/mp4';
+                } else {
+                    // Use default
+                    delete options.mimeType;
+                }
+            }
+
+            // Initialize MediaRecorder
+            this.mediaRecorder = new MediaRecorder(audioStream, options);
+            this.audioChunks = [];
+
+            // Set up MediaRecorder event handlers
+            this.mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    this.handleAudioChunk(event.data);
+                }
+            };
+
+            this.mediaRecorder.onstart = () => {
+                console.log('MediaRecorder started for STT');
+                this.isAudioStreaming = true;
+                this.speechToAslStatus.textContent = 'Initializing speech recognition...';
+                
+                // Notify backend to start audio streaming
+                if (this.socket && this.socket.connected) {
+                    this.socket.emit('start-audio-stream', {
+                        mimeType: this.mediaRecorder.mimeType,
+                        timestamp: Date.now()
+                    });
+                }
+            };
+
+            this.mediaRecorder.onstop = () => {
+                console.log('MediaRecorder stopped for STT');
+                this.isAudioStreaming = false;
+                this.speechToAslStatus.textContent = 'Speech processing stopped';
+                
+                // Notify backend to stop audio streaming
+                if (this.socket && this.socket.connected) {
+                    this.socket.emit('stop-audio-stream', {
+                        timestamp: Date.now()
+                    });
+                }
+            };
+
+            this.mediaRecorder.onerror = (event) => {
+                console.error('MediaRecorder error:', event.error);
+                this.updateStatus(`Audio recording error: ${event.error.name}`, 'error');
+                this.speechToAslStatus.textContent = 'Speech processing error';
+                this.stopAudioStreaming();
+            };
+
+            // Start recording in chunks (send data every 1 second for real-time STT)
+            this.mediaRecorder.start(1000);
+            this.updateStatus('Started audio capture for speech recognition', 'success');
+
+        } catch (error) {
+            console.error('Error starting speech processing:', error);
+            this.updateStatus(`Failed to start speech processing: ${error.message}`, 'error');
+            this.speechToAslStatus.textContent = 'Speech processing failed';
+        }
+    }
+
+    async handleAudioChunk(audioBlob) {
+        if (!this.isAudioStreaming || !this.socket || !this.socket.connected) {
+            return;
+        }
+
+        try {
+            // Convert blob to base64 for transmission over Socket.IO
+            const reader = new FileReader();
+            reader.onload = () => {
+                const base64Data = reader.result.split(',')[1]; // Remove data:audio/webm;base64, prefix
+                
+                // Send audio chunk to backend
+                this.socket.emit('audio-chunk', {
+                    audioData: base64Data,
+                    timestamp: Date.now(),
+                    size: audioBlob.size,
+                    type: audioBlob.type
+                });
+            };
+            
+            reader.onerror = (error) => {
+                console.error('Error reading audio blob:', error);
+                this.updateStatus('Error processing audio chunk', 'error');
+            };
+            
+            reader.readAsDataURL(audioBlob);
+            
+        } catch (error) {
+            console.error('Error handling audio chunk:', error);
+            this.updateStatus('Error processing audio for speech recognition', 'error');
+        }
+    }
+
+    stopAudioStreaming() {
+        if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+            try {
+                this.mediaRecorder.stop();
+            } catch (error) {
+                console.error('Error stopping MediaRecorder:', error);
+            }
+        }
+        
+        // Clean up
+        this.mediaRecorder = null;
+        this.isAudioStreaming = false;
+        this.audioChunks = [];
+        this.speechToAslStatus.textContent = 'Ready';
     }
 
     updateStatus(message, type = 'info', showSpinner = false, autoHide = true) {
