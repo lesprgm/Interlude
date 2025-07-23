@@ -5,13 +5,12 @@ import socketio
 import asyncio
 import logging
 from google.cloud import speech_v1p1beta1 as speech
-from google.oauth2 import service_account # For explicit credential loading if needed, but env var is simpler
-import base64
+# from google.oauth2 import service_account # Not needed if GOOGLE_APPLICATION_CREDENTIALS env var is set
+# import base64 # No longer needed as audio is handled as binary directly
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 # Initialize Socket.IO server
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins="*")
@@ -71,7 +70,6 @@ STT_CONFIG = speech.RecognitionConfig(
     sample_rate_hertz=16000,
     language_code="en-US",
     enable_automatic_punctuation=True,
-    # interim_results=True # Enable for faster partial results
 )
 STREAMING_CONFIG = speech.StreamingRecognitionConfig(
     config=STT_CONFIG,
@@ -150,14 +148,15 @@ async def join_room(sid, data):
     elif len(room) > 2:
         await sio.emit('room-full', room=sid)
 
-# --- STT Audio Streaming Event Handlers ---
-@sio.on('start_audio_stream')
-async def start_audio_stream(sid, data):
-    # 'data' can contain audio configuration from frontend if needed
+# --- STT Audio Streaming Event Handlers (Consolidated and Corrected) ---
+@sio.on('start_audio_stream') # Note: Event name is 'start_audio_stream' (snake_case)
+async def start_audio_stream(sid, data=None): # data is optional, might contain audio config
     logger.info(f"Starting audio stream for {sid}")
     if sid in active_stt_streams:
         logger.warning(f"STT stream already active for {sid}, closing existing one.")
-        active_stt_streams[sid][0].close() # Close previous generator
+        # Close the generator to signal end of stream to GCP
+        active_stt_streams[sid][0].close() 
+        del active_stt_streams[sid]
 
     # Create a new audio content generator for this session
     # This generator will yield AudioContent objects as chunks come in
@@ -172,20 +171,17 @@ async def start_audio_stream(sid, data):
     asyncio.create_task(handle_stt_responses(sid, responses))
     logger.info(f"STT streaming recognition initiated for {sid}")
 
-@sio.on('send_audio_chunk')
+@sio.on('send_audio_chunk') # Note: Event name is 'send_audio_chunk' (snake_case)
 async def send_audio_chunk(sid, audio_data):
     if sid not in active_stt_streams:
         logger.warning(f"Received audio chunk for {sid} but no active STT stream. Ignoring.")
         return
     
-    # Send the audio data to the generator.
-    # The generator is a placeholder; we need to feed it data.
-    # In a real async scenario, you'd use a queue or similar.
-    # For now, we'll directly send to the underlying gRPC stream.
-    # The `_write` method is internal, but common for this pattern.
     try:
+        # Send the audio data to the generator.
+        # The `_write` method is internal but used for feeding data to gRPC streams.
         active_stt_streams[sid][0]._write(audio_data)
-        # logger.debug(f"Sent {len(audio_data)} bytes for {sid}")
+        # logger.debug(f"Sent {len(audio_data)} bytes for {sid}") # Uncomment for detailed chunk logging
     except Exception as e:
         logger.error(f"Error sending audio chunk for {sid}: {e}", exc_info=True)
         # Consider closing stream if error occurs
@@ -193,8 +189,8 @@ async def send_audio_chunk(sid, audio_data):
             active_stt_streams[sid][0].close()
             del active_stt_streams[sid]
 
-@sio.on('end_audio_stream')
-async def end_audio_stream(sid):
+@sio.on('end_audio_stream') # Note: Event name is 'end_audio_stream' (snake_case)
+async def end_audio_stream(sid, data=None): # data is optional
     logger.info(f"Ending audio stream for {sid}")
     if sid in active_stt_streams:
         active_stt_streams[sid][0].close() # Signal end of stream to GCP
@@ -202,33 +198,47 @@ async def end_audio_stream(sid):
         logger.info(f"STT stream for {sid} explicitly ended.")
 
 async def handle_stt_responses(sid, responses):
-    """Background task to process responses from GCP STT."""
+    """Background task to process responses from GCP STT and relay to peer."""
     try:
+        user_info = users.get(sid)
+        if not user_info or not user_info['room']:
+            logger.warning(f"User {sid} not in a room, cannot relay transcript.")
+            return
+
+        room_id = user_info['room']
+        current_room_sids = rooms.get(room_id)
+
+        if not current_room_sids or len(current_room_sids) != 2:
+            logger.warning(f"Room {room_id} does not have exactly two users, cannot relay transcript for {sid}.")
+            return
+
+        # Find the other user in the room
+        other_user_sid = next(iter(s for s in current_room_sids if s != sid), None)
+
+        if not other_user_sid:
+            logger.warning(f"Could not find peer for {sid} in room {room_id}, cannot relay transcript.")
+            return
+
         for response in responses:
             if not response.results:
                 continue
 
-            # The first result is the most likely one.
             result = response.results[0]
             if not result.alternatives:
                 continue
 
-            # The first alternative is the most likely transcription.
             transcript = result.alternatives[0].transcript
             
             if result.is_final:
-                logger.info(f"Final Transcript for {sid}: {transcript}")
-                # TODO: In Session 2, you will emit this to the other user
-                # await sio.emit('transcribed_text', {'text': transcript, 'isFinal': True}, room=other_user_sid)
+                logger.info(f"Final Transcript for {sid} (relaying to {other_user_sid}): {transcript}")
+                await sio.emit('transcribed_text', {'text': transcript, 'isFinal': True}, room=other_user_sid)
             else:
-                logger.info(f"Partial Transcript for {sid}: {transcript}")
-                # TODO: In Session 2, you will emit this to the other user
-                # await sio.emit('transcribed_text', {'text': transcript, 'isFinal': False}, room=other_user_sid)
+                logger.info(f"Partial Transcript for {sid} (relaying to {other_user_sid}): {transcript}")
+                await sio.emit('transcribed_text', {'text': transcript, 'isFinal': False}, room=other_user_sid)
     except Exception as e:
         logger.error(f"Error processing STT responses for {sid}: {e}", exc_info=True)
     finally:
         if sid in active_stt_streams:
-            # Ensure stream is cleaned up if background task exits due to error or completion
             active_stt_streams[sid][0].close()
             del active_stt_streams[sid]
             logger.info(f"STT response handler for {sid} finished/cleaned up.")
@@ -265,63 +275,6 @@ async def webrtc_ice_candidate(sid, data):
 @sio.event
 async def message(sid, data):
     await sio.emit('message', f'Server received: {data}', room=sid)
-
-# STT (Speech-to-Text) Event Handlers
-@sio.on('start-audio-stream')
-async def start_audio_stream(sid, data):
-    """Handle start of audio streaming for STT processing"""
-    try:
-        user = users.get(sid)
-        if user:
-            user['audio_streaming'] = True
-            await sio.emit('audio-stream-started', {'status': 'success'}, room=sid)
-            # Log for debugging
-            print(f"Started audio streaming for user {sid}")
-        else:
-            await sio.emit('audio-stream-error', {'error': 'User not found'}, room=sid)
-    except Exception as e:
-        print(f"Error starting audio stream for {sid}: {e}")
-        await sio.emit('audio-stream-error', {'error': str(e)}, room=sid)
-
-@sio.on('audio-chunk')
-async def handle_audio_chunk(sid, data):
-    """Handle incoming audio chunks for STT processing"""
-    try:
-        user = users.get(sid)
-        if not user or not user.get('audio_streaming', False):
-            return
-            
-        audio_data = data.get('audioData')
-        timestamp = data.get('timestamp')
-        chunk_size = data.get('size', 0)
-        
-        if audio_data:
-            # Essential logging for production monitoring
-            print(f"Audio chunk received from {sid}: {chunk_size} bytes")
-            
-            # TODO: Forward to STT service (Google Cloud Speech, etc.)
-            # For now, just acknowledge receipt
-            await sio.emit('audio-chunk-received', {
-                'timestamp': timestamp, 
-                'status': 'processed'
-            }, room=sid)
-            
-    except Exception as e:
-        print(f"Error processing audio chunk from {sid}: {e}")
-        await sio.emit('audio-stream-error', {'error': str(e)}, room=sid)
-
-@sio.on('stop-audio-stream')
-async def stop_audio_stream(sid, data):
-    """Handle stop of audio streaming"""
-    try:
-        user = users.get(sid)
-        if user:
-            user['audio_streaming'] = False
-            await sio.emit('audio-stream-stopped', {'status': 'success'}, room=sid)
-            print(f"Stopped audio streaming for user {sid}")
-    except Exception as e:
-        print(f"Error stopping audio stream for {sid}: {e}")
-        await sio.emit('audio-stream-error', {'error': str(e)}, room=sid)
 
 if __name__ == "__main__":
     uvicorn.run(app_with_sio, host="0.0.0.0", port=8000)
