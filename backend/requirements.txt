@@ -1,3 +1,4 @@
 fastapi
 uvicorn
-python-socketio[asyncio_server]
+python-socketio
+google-cloud-speech
