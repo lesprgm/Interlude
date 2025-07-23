@@ -179,6 +179,7 @@ class InterludeApp {
 
             // Real-time subtitle display handler
             this.socket.on('subtitle', (data) => {
+                console.log('[Socket.IO] Received subtitle event:', data);
                 // data: { text: string, isFinal: boolean }
                 const subtitleDiv = document.getElementById('subtitleDisplay');
                 if (subtitleDiv && data && typeof data.text === 'string') {
@@ -189,6 +190,8 @@ class InterludeApp {
                     } else {
                         subtitleDiv.classList.remove('final');
                     }
+                } else {
+                    console.warn('[Socket.IO] Subtitle event missing text or subtitleDisplay element:', data);
                 }
             });
 
