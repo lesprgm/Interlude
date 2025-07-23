@@ -1181,6 +1181,53 @@ body {
   color: var(--color-gray-900);
 }
 
+/* Subtitle Display Styles */
+.subtitle-display {
+  position: absolute;
+  left: 50%;
+  bottom: 2.5rem;
+  transform: translateX(-50%);
+  min-width: 200px;
+  max-width: 80vw;
+  padding: 0.5rem 1.5rem;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 1.5rem;
+  font-weight: 600;
+  text-align: center;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+  z-index: 20;
+  pointer-events: none;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  transition: background 0.2s, color 0.2s;
+}
+.subtitle-display.final {
+  background: rgba(37, 99, 235, 0.85);
+  color: #fff;
+}
+
+/* Responsive for mobile */
+@media (max-width: 600px) {
+  .subtitle-display {
+    font-size: 1.1rem;
+    padding: 0.4rem 0.7rem;
+    bottom: 1.2rem;
+    max-width: 96vw;
+  }
+}
+
+/* Dark mode support */
+.dark-theme .subtitle-display {
+  background: rgba(255,255,255,0.13);
+  color: #fff;
+}
+.dark-theme .subtitle-display.final {
+  background: rgba(37, 99, 235, 0.95);
+  color: #fff;
+}
+
 /* Responsive Design */
 @media (max-width: 1024px) {
   .app-container {
