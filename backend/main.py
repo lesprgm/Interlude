@@ -2,6 +2,8 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import HTMLResponse
 import socketio
+import base64
+import asyncio
 
 # Initialize Socket.IO server
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins="*")
@@ -140,6 +142,63 @@ async def webrtc_ice_candidate(sid, data):
 async def message(sid, data):
     # Echo message back
     await sio.emit('message', f'Server received: {data}', room=sid)
+
+# STT (Speech-to-Text) Event Handlers
+@sio.on('start-audio-stream')
+async def start_audio_stream(sid, data):
+    """Handle start of audio streaming for STT processing"""
+    try:
+        user = users.get(sid)
+        if user:
+            user['audio_streaming'] = True
+            await sio.emit('audio-stream-started', {'status': 'success'}, room=sid)
+            # Log for debugging
+            print(f"Started audio streaming for user {sid}")
+        else:
+            await sio.emit('audio-stream-error', {'error': 'User not found'}, room=sid)
+    except Exception as e:
+        print(f"Error starting audio stream for {sid}: {e}")
+        await sio.emit('audio-stream-error', {'error': str(e)}, room=sid)
+
+@sio.on('audio-chunk')
+async def handle_audio_chunk(sid, data):
+    """Handle incoming audio chunks for STT processing"""
+    try:
+        user = users.get(sid)
+        if not user or not user.get('audio_streaming', False):
+            return
+            
+        audio_data = data.get('audioData')
+        timestamp = data.get('timestamp')
+        chunk_size = data.get('size', 0)
+        
+        if audio_data:
+            # Essential logging for production monitoring
+            print(f"Audio chunk received from {sid}: {chunk_size} bytes")
+            
+            # TODO: Forward to STT service (Google Cloud Speech, etc.)
+            # For now, just acknowledge receipt
+            await sio.emit('audio-chunk-received', {
+                'timestamp': timestamp, 
+                'status': 'processed'
+            }, room=sid)
+            
+    except Exception as e:
+        print(f"Error processing audio chunk from {sid}: {e}")
+        await sio.emit('audio-stream-error', {'error': str(e)}, room=sid)
+
+@sio.on('stop-audio-stream')
+async def stop_audio_stream(sid, data):
+    """Handle stop of audio streaming"""
+    try:
+        user = users.get(sid)
+        if user:
+            user['audio_streaming'] = False
+            await sio.emit('audio-stream-stopped', {'status': 'success'}, room=sid)
+            print(f"Stopped audio streaming for user {sid}")
+    except Exception as e:
+        print(f"Error stopping audio stream for {sid}: {e}")
+        await sio.emit('audio-stream-error', {'error': str(e)}, room=sid)
 
 if __name__ == "__main__":
     # When running with uvicorn directly, you use the app_with_sio
