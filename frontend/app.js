@@ -22,6 +22,11 @@ class InterludeApp {
         this.isAudioStreaming = false;
         this.audioChunks = [];
         
+        // MediaPipe Holistic for ASL recognition
+        this.holistic = null;
+        this.localCanvas = null;
+        this.localCanvasCtx = null;
+        
         // WebRTC Configuration with STUN servers
         this.rtcConfiguration = {
             iceServers: [
@@ -53,6 +58,10 @@ class InterludeApp {
         // Role selection elements
         this.roleHearingRadio = document.getElementById('roleHearing');
         this.roleDeafRadio = document.getElementById('roleDeaf');
+        
+        // MediaPipe canvas elements
+        this.localCanvas = document.getElementById('localCanvas');
+        this.localCanvasCtx = this.localCanvas.getContext('2d');
         
         // Settings elements
         this.settingsBtn = document.getElementById('settingsBtn');
@@ -196,25 +205,17 @@ class InterludeApp {
 
             // Real-time subtitle display handler
             // The backend emits 'transcribed_text', not 'subtitle'
-            this.socket.on('transcribed_text', (data) => { // <--- Changed from 'subtitle' to 'transcribed_text'
-                console.log('[Socket.IO] Received transcribed_text event:', data);
-                // data: { text: string, isFinal: boolean }
-                
+            this.socket.on('transcribed_text', (data) => {
                 if (this.userRole === 'deaf') {
                     const subtitleDiv = document.getElementById('subtitleDisplay');
                     if (subtitleDiv && data && typeof data.text === 'string') {
                         subtitleDiv.textContent = data.text;
-                        // Optionally, add a class for final/partial
                         if (data.isFinal) {
                             subtitleDiv.classList.add('final');
                         } else {
                             subtitleDiv.classList.remove('final');
                         }
-                    } else {
-                        console.warn('[Socket.IO] transcribed_text event missing text or subtitleDisplay element:', data);
                     }
-                } else {
-                    console.log('Not displaying subtitles: User role is not "deaf".');
                 }
             });
 
@@ -307,6 +308,12 @@ class InterludeApp {
             // Display local video stream
             this.localVideo.srcObject = this.localStream;
             this.updateStatus('Local video stream connected successfully', 'success');
+            
+                            // Set canvas dimensions to match video when metadata is loaded
+                this.localVideo.addEventListener('loadedmetadata', () => {
+                    this.localCanvas.width = this.localVideo.videoWidth;
+                    this.localCanvas.height = this.localVideo.videoHeight;
+                });
 
             // Initialize WebRTC peer connection
             await this.initializePeerConnection();
@@ -329,14 +336,20 @@ class InterludeApp {
                 }, 1000);
             }
 
-            // Start ASL recognition and speech processing
-            this.startAslRecognition();
-            if (this.userRole === 'hearing') {
-                this.startSpeechProcessing(); // This will now include logging for data flow
+            // Start ASL recognition and speech processing based on user role
+            if (this.userRole === 'deaf') {
+                this.startAslRecognition();
             } else {
-                this.speechToAslStatus.textContent = 'Speech processing skipped: User role is Deaf.';
-                this.updateStatus('Speech processing skipped: User role is Deaf.', 'info');
+                this.aslToSpeechStatus.textContent = 'ASL recognition skipped: User role is Hearing.';
+                this.updateStatus('ASL recognition skipped: User role is Hearing.', 'info');
             }
+            
+                            if (this.userRole === 'hearing') {
+                    this.startSpeechProcessing();
+                } else {
+                    this.speechToAslStatus.textContent = 'Speech processing skipped: User role is Deaf.';
+                    this.updateStatus('Speech processing skipped: User role is Deaf.', 'info');
+                }
 
         } catch (error) {
             console.error('Error starting call:', error);
@@ -358,6 +371,9 @@ class InterludeApp {
         try {
             // Stop audio streaming for STT
             this.stopAudioStreaming();
+            
+            // Stop ASL recognition
+            this.stopAslRecognition();
             
             // Stop all media streams
             if (this.localStream) {
@@ -667,7 +683,6 @@ class InterludeApp {
                 return;
             }
 
-            console.log('Audio track state:', audioTrack.readyState, 'enabled:', audioTrack.enabled);
             if (audioTrack.readyState !== 'live' || !audioTrack.enabled) {
                 this.updateStatus('Audio track is not live or enabled. Cannot start speech processing.', 'error');
                 return;
@@ -681,21 +696,14 @@ class InterludeApp {
 
             this.mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
-                    console.log(`Sending audio chunk: ${event.data.size} bytes`); // Log chunk size
-                    // Send audio chunk to backend
                     this.socket.emit('send_audio_chunk', event.data);
-                } else {
-                    console.warn('Empty audio chunk received from MediaRecorder.');
                 }
             };
 
             this.mediaRecorder.onstop = () => {
-                console.log('MediaRecorder stopped.');
-                this.updateStatus('MediaRecorder stopped.', 'info');
                 this.isAudioStreaming = false;
                 this.speechToAslStatus.textContent = 'Speech processing stopped.';
-                this.audioChunks = []; // Clear audio chunks on stop
-                // Inform backend that audio stream has ended
+                this.audioChunks = [];
                 this.socket.emit('end_audio_stream');
             };
 
@@ -735,16 +743,181 @@ class InterludeApp {
         }
     }
 
-    // --- ASL Recognition Integration (Placeholder) ---
+    // --- ASL Recognition Integration with MediaPipe Holistic ---
     startAslRecognition() {
-        this.aslToSpeechStatus.textContent = 'ASL recognition active (placeholder)';
-        this.updateStatus('ASL recognition started (placeholder)', 'info');
+                try {
+            console.log('Starting ASL recognition...');
+            
+            // Initialize MediaPipe Holistic
+            this.holistic = new window.Holistic({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`;
+                }
+            });
+
+            // Set up results callback
+            this.holistic.onResults = (results) => {
+                // Clear the canvas
+                this.localCanvasCtx.clearRect(0, 0, this.localCanvas.width, this.localCanvas.height);
+                
+                // Draw landmarks
+                if (results.poseLandmarks) {
+                    this.drawLandmarks(this.localCanvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2, radius: 3});
+                }
+                
+                if (results.leftHandLandmarks) {
+                    this.drawLandmarks(this.localCanvasCtx, results.leftHandLandmarks, {color: '#00FF00', lineWidth: 2, radius: 3});
+                }
+                
+                if (results.rightHandLandmarks) {
+                    this.drawLandmarks(this.localCanvasCtx, results.rightHandLandmarks, {color: '#0000FF', lineWidth: 2, radius: 3});
+                }
+
+                // Prepare and stream keypoint data to backend
+                const keypointData = this.prepareKeypointData(results);
+                if (this.socket && this.socket.connected && keypointData) {
+                    this.socket.emit('asl_keypoints', keypointData);
+                }
+            };
+
+            // Set MediaPipe options for optimal detection
+            this.holistic.setOptions({
+                modelComplexity: 1,
+                smoothLandmarks: true,
+                enableSegmentation: false,
+                smoothSegmentation: false,
+                refineFaceLandmarks: true,
+                minDetectionConfidence: 0.05,
+                minTrackingConfidence: 0.05
+            });
+
+            // Start processing video frames after MediaPipe initialization
+            setTimeout(() => {
+                this.processVideoFrames();
+            }, 1000);
+            
+            this.aslToSpeechStatus.textContent = 'Processing ASL...';
+            this.updateStatus('ASL recognition started', 'success');
+            
+        } catch (error) {
+            console.error('Error starting ASL recognition:', error);
+            this.updateStatus(`Failed to start ASL recognition: ${error.message}`, 'error');
+            this.aslToSpeechStatus.textContent = 'ASL recognition error';
+        }
     }
 
     stopAslRecognition() {
-        this.aslToSpeechStatus.textContent = 'ASL recognition inactive (placeholder)';
-        this.updateStatus('ASL recognition stopped (placeholder)', 'info');
+        try {
+            if (this.holistic) {
+                this.holistic.close();
+                this.holistic = null;
+            }
+            
+            // Clear the canvas
+            if (this.localCanvasCtx) {
+                this.localCanvasCtx.clearRect(0, 0, this.localCanvas.width, this.localCanvas.height);
+            }
+``            
+            this.aslToSpeechStatus.textContent = 'ASL recognition stopped';
+            this.updateStatus('ASL recognition stopped', 'info');
+            
+        } catch (error) {
+            console.error('Error stopping ASL recognition:', error);
+            this.updateStatus(`Error stopping ASL recognition: ${error.message}`, 'error');
+        }
     }
+
+            // Process video frames for MediaPipe
+        processVideoFrames() {
+            const sendFrame = async () => {
+                if (this.holistic && this.localVideo.readyState >= 2) {
+                    try {
+                        await this.holistic.send({image: this.localVideo});
+                    } catch (error) {
+                        console.error('Error sending frame to MediaPipe:', error);
+                    }
+                }
+                
+                // Continue processing frames
+                if (this.holistic) {
+                    requestAnimationFrame(sendFrame);
+                }
+            };
+            
+            sendFrame();
+        }
+
+    // Draw landmarks on canvas (backup method if MediaPipe drawing utils not available)
+    drawLandmarks(ctx, landmarks, style = {}) {
+        const {color = '#FF0000', lineWidth = 2, radius = 3} = style;
+        
+        ctx.fillStyle = color;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lineWidth;
+        
+        // Draw landmark points
+        landmarks.forEach((landmark) => {
+            const x = landmark.x * this.localCanvas.width;
+            const y = landmark.y * this.localCanvas.height;
+            
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, 2 * Math.PI);
+            ctx.fill();
+        });
+    }
+
+            // Prepare keypoint data for streaming to backend
+        prepareKeypointData(results) {
+            try {
+                const keypointData = {
+                    timestamp: Date.now(),
+                    pose: null,
+                    leftHand: null,
+                    rightHand: null
+                };
+
+                // Process pose landmarks
+                if (results.poseLandmarks && results.poseLandmarks.length > 0) {
+                    keypointData.pose = results.poseLandmarks.map((landmark, index) => ({
+                        id: index,
+                        x: parseFloat(landmark.x.toFixed(4)),
+                        y: parseFloat(landmark.y.toFixed(4)),
+                        z: parseFloat(landmark.z.toFixed(4)),
+                        visibility: parseFloat((landmark.visibility || 0).toFixed(4))
+                    }));
+                }
+
+                // Process left hand landmarks
+                if (results.leftHandLandmarks && results.leftHandLandmarks.length > 0) {
+                    keypointData.leftHand = results.leftHandLandmarks.map((landmark, index) => ({
+                        id: index,
+                        x: parseFloat(landmark.x.toFixed(4)),
+                        y: parseFloat(landmark.y.toFixed(4)),
+                        z: parseFloat(landmark.z.toFixed(4))
+                    }));
+                }
+
+                // Process right hand landmarks
+                if (results.rightHandLandmarks && results.rightHandLandmarks.length > 0) {
+                    keypointData.rightHand = results.rightHandLandmarks.map((landmark, index) => ({
+                        id: index,
+                        x: parseFloat(landmark.x.toFixed(4)),
+                        y: parseFloat(landmark.y.toFixed(4)),
+                        z: parseFloat(landmark.z.toFixed(4))
+                    }));
+                }
+
+                // Only return data if we have at least one set of landmarks
+                if (keypointData.pose || keypointData.leftHand || keypointData.rightHand) {
+                    return keypointData;
+                }
+
+                return null;
+            } catch (error) {
+                console.error('Error preparing keypoint data:', error);
+                return null;
+            }
+        }
 
     // --- UI Initialization and Settings ---
     initializeUI() {

@@ -8,6 +8,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- MediaPipe Holistic for ASL keypoint detection -->
+    <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+    <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
 </head>
 <body>
     <div class="app-container">
@@ -45,6 +50,7 @@
                 <div class="video-card local-video-card">
                     <div class="video-wrapper">
                         <video id="localVideo" autoplay muted playsinline></video>
+                        <canvas id="localCanvas" class="video-overlay-canvas"></canvas>
                         <div class="video-overlay">
                             <div class="video-label">You</div>
                             <div class="video-controls">
