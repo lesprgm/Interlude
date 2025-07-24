@@ -14,7 +14,7 @@ python main.py
 ### 2. Start Frontend Server
 ```bash
 cd frontend
-python3 -m http.server 3000
+python3 -m http.server 3000 or 5050
 ```
 
 ### 3. Access Application
