@@ -176,6 +176,17 @@
                         <input type="text" id="roomIdInput" placeholder="Enter room ID..." value="interlude-room">
                         <div class="input-hint">Share the same Room ID with someone to start a video call</div>
                     </div>
+                    
+                    <div class="input-group">
+                        <label for="userRole">Your Role</label>
+                        <div class="role-selection">
+                            <input type="radio" id="roleHearing" name="userRole" value="hearing" checked>
+                            <label for="roleHearing">Hearing</label>
+                            <input type="radio" id="roleDeaf" name="userRole" value="deaf">
+                            <label for="roleDeaf">Deaf</label>
+                        </div>
+                        <div class="input-hint">Select your role to customize the communication experience</div>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button id="joinRoomBtn" class="primary-btn">

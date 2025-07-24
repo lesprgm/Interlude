@@ -15,6 +15,7 @@ class InterludeApp {
         this.currentRoom = null;
         this.remotePeerId = null;
         this.isInitiator = false;
+        this.userRole = 'hearing'; // Add user role property
         
         // Audio streaming for STT
         this.mediaRecorder = null;
@@ -49,6 +50,10 @@ class InterludeApp {
         this.connectionText = document.getElementById('connectionText');
         this.remoteVideoPlaceholder = document.getElementById('remoteVideoPlaceholder');
         
+        // Role selection elements
+        this.roleHearingRadio = document.getElementById('roleHearing');
+        this.roleDeafRadio = document.getElementById('roleDeaf');
+        
         // Settings elements
         this.settingsBtn = document.getElementById('settingsBtn');
         this.settingsModal = document.getElementById('settingsModal');
@@ -74,6 +79,18 @@ class InterludeApp {
         this.joinRoomBtn.addEventListener('click', () => this.joinRoom());
         this.roomIdInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.joinRoom();
+        });
+        
+        // Role selection event listeners
+        this.roleHearingRadio.addEventListener('change', () => {
+            if (this.roleHearingRadio.checked) {
+                this.userRole = 'hearing';
+            }
+        });
+        this.roleDeafRadio.addEventListener('change', () => {
+            if (this.roleDeafRadio.checked) {
+                this.userRole = 'deaf';
+            }
         });
         
         // Settings event listeners
@@ -182,17 +199,22 @@ class InterludeApp {
             this.socket.on('transcribed_text', (data) => { // <--- Changed from 'subtitle' to 'transcribed_text'
                 console.log('[Socket.IO] Received transcribed_text event:', data);
                 // data: { text: string, isFinal: boolean }
-                const subtitleDiv = document.getElementById('subtitleDisplay');
-                if (subtitleDiv && data && typeof data.text === 'string') {
-                    subtitleDiv.textContent = data.text;
-                    // Optionally, add a class for final/partial
-                    if (data.isFinal) {
-                        subtitleDiv.classList.add('final');
+                
+                if (this.userRole === 'deaf') {
+                    const subtitleDiv = document.getElementById('subtitleDisplay');
+                    if (subtitleDiv && data && typeof data.text === 'string') {
+                        subtitleDiv.textContent = data.text;
+                        // Optionally, add a class for final/partial
+                        if (data.isFinal) {
+                            subtitleDiv.classList.add('final');
+                        } else {
+                            subtitleDiv.classList.remove('final');
+                        }
                     } else {
-                        subtitleDiv.classList.remove('final');
+                        console.warn('[Socket.IO] transcribed_text event missing text or subtitleDisplay element:', data);
                     }
                 } else {
-                    console.warn('[Socket.IO] transcribed_text event missing text or subtitleDisplay element:', data);
+                    console.log('Not displaying subtitles: User role is not "deaf".');
                 }
             });
 
@@ -214,9 +236,17 @@ class InterludeApp {
             return;
         }
 
+        // Get selected role
+        const selectedRole = document.querySelector('input[name="userRole"]:checked');
+        if (!selectedRole) {
+            this.updateStatus('Please select your role (Hearing or Deaf)', 'error');
+            return;
+        }
+        
+        this.userRole = selectedRole.value;
         this.currentRoom = roomId;
-        this.socket.emit('join_room', { roomId: roomId });
-        this.updateStatus(`Joining room: ${roomId}...`, 'info', true);
+        this.socket.emit('join_room', { roomId: roomId, userRole: this.userRole });
+        this.updateStatus(`Joining room: ${roomId} as ${this.userRole}...`, 'info', true);
         
         // Hide room selection modal
         document.getElementById('roomSelection').style.display = 'none';
@@ -301,7 +331,12 @@ class InterludeApp {
 
             // Start ASL recognition and speech processing
             this.startAslRecognition();
-            this.startSpeechProcessing(); // This will now include logging for data flow
+            if (this.userRole === 'hearing') {
+                this.startSpeechProcessing(); // This will now include logging for data flow
+            } else {
+                this.speechToAslStatus.textContent = 'Speech processing skipped: User role is Deaf.';
+                this.updateStatus('Speech processing skipped: User role is Deaf.', 'info');
+            }
 
         } catch (error) {
             console.error('Error starting call:', error);
@@ -394,8 +429,8 @@ class InterludeApp {
                     this.toggleAudioBtn.classList.add('active');
                     this.toggleAudioBtn.title = 'Mute audio';
                     
-                    // Resume audio streaming if call is active
-                    if (this.isCallActive && !this.isAudioStreaming) {
+                    // Resume audio streaming if call is active and user is hearing
+                    if (this.isCallActive && !this.isAudioStreaming && this.userRole === 'hearing') {
                         this.startSpeechProcessing();
                     }
                 } else {
@@ -724,6 +759,10 @@ class InterludeApp {
         // Set default room ID
         const defaultRoomId = 'interlude-room'; // You can make this dynamic or user-configurable
         this.roomIdInput.value = defaultRoomId;
+        
+        // Set default role selection
+        this.roleHearingRadio.checked = true;
+        this.userRole = 'hearing';
     }
 
     addToggleSwitchListeners() {
