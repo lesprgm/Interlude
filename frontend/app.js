@@ -22,6 +22,11 @@ class InterludeApp {
         this.isAudioStreaming = false;
         this.audioChunks = [];
         
+        // MediaPipe Holistic for ASL recognition
+        this.holistic = null;
+        this.localCanvas = null;
+        this.localCanvasCtx = null;
+        
         // WebRTC Configuration with STUN servers
         this.rtcConfiguration = {
             iceServers: [
@@ -53,6 +58,10 @@ class InterludeApp {
         // Role selection elements
         this.roleHearingRadio = document.getElementById('roleHearing');
         this.roleDeafRadio = document.getElementById('roleDeaf');
+        
+        // MediaPipe canvas elements
+        this.localCanvas = document.getElementById('localCanvas');
+        this.localCanvasCtx = this.localCanvas.getContext('2d');
         
         // Settings elements
         this.settingsBtn = document.getElementById('settingsBtn');
@@ -307,6 +316,12 @@ class InterludeApp {
             // Display local video stream
             this.localVideo.srcObject = this.localStream;
             this.updateStatus('Local video stream connected successfully', 'success');
+            
+            // Set canvas dimensions to match video when metadata is loaded
+            this.localVideo.addEventListener('loadedmetadata', () => {
+                this.localCanvas.width = this.localVideo.videoWidth;
+                this.localCanvas.height = this.localVideo.videoHeight;
+            });
 
             // Initialize WebRTC peer connection
             await this.initializePeerConnection();
@@ -329,8 +344,14 @@ class InterludeApp {
                 }, 1000);
             }
 
-            // Start ASL recognition and speech processing
-            this.startAslRecognition();
+            // Start ASL recognition and speech processing based on user role
+            if (this.userRole === 'deaf') {
+                this.startAslRecognition();
+            } else {
+                this.aslToSpeechStatus.textContent = 'ASL recognition skipped: User role is Hearing.';
+                this.updateStatus('ASL recognition skipped: User role is Hearing.', 'info');
+            }
+            
             if (this.userRole === 'hearing') {
                 this.startSpeechProcessing(); // This will now include logging for data flow
             } else {
@@ -358,6 +379,9 @@ class InterludeApp {
         try {
             // Stop audio streaming for STT
             this.stopAudioStreaming();
+            
+            // Stop ASL recognition
+            this.stopAslRecognition();
             
             // Stop all media streams
             if (this.localStream) {
@@ -735,15 +759,192 @@ class InterludeApp {
         }
     }
 
-    // --- ASL Recognition Integration (Placeholder) ---
+    // --- ASL Recognition Integration with MediaPipe Holistic ---
     startAslRecognition() {
-        this.aslToSpeechStatus.textContent = 'ASL recognition active (placeholder)';
-        this.updateStatus('ASL recognition started (placeholder)', 'info');
+        try {
+            // Initialize MediaPipe Holistic
+            this.holistic = new window.Holistic({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`;
+                }
+            });
+
+            // Set MediaPipe options
+            this.holistic.setOptions({
+                modelComplexity: 1,
+                smoothLandmarks: true,
+                enableSegmentation: false,
+                smoothSegmentation: false,
+                refineFaceLandmarks: false,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            // Set up results callback
+            this.holistic.onResults = (results) => {
+                // Clear the canvas
+                this.localCanvasCtx.clearRect(0, 0, this.localCanvas.width, this.localCanvas.height);
+                
+                // Draw landmarks if available using MediaPipe drawing utilities
+                if (results.poseLandmarks) {
+                    window.drawConnectors(this.localCanvasCtx, results.poseLandmarks, window.POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+                    window.drawLandmarks(this.localCanvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 1, radius: 2});
+                    console.log('Pose landmarks detected:', results.poseLandmarks.length, 'points');
+                }
+                
+                if (results.leftHandLandmarks) {
+                    window.drawConnectors(this.localCanvasCtx, results.leftHandLandmarks, window.HAND_CONNECTIONS, {color: '#CC0000', lineWidth: 2});
+                    window.drawLandmarks(this.localCanvasCtx, results.leftHandLandmarks, {color: '#00FF00', lineWidth: 1, radius: 2});
+                    console.log('Left hand landmarks detected:', results.leftHandLandmarks.length, 'points');
+                }
+                
+                if (results.rightHandLandmarks) {
+                    window.drawConnectors(this.localCanvasCtx, results.rightHandLandmarks, window.HAND_CONNECTIONS, {color: '#0000CC', lineWidth: 2});
+                    window.drawLandmarks(this.localCanvasCtx, results.rightHandLandmarks, {color: '#0000FF', lineWidth: 1, radius: 2});
+                    console.log('Right hand landmarks detected:', results.rightHandLandmarks.length, 'points');
+                }
+
+                // Log the complete results for debugging
+                console.log('MediaPipe Results:', {
+                    pose: results.poseLandmarks ? results.poseLandmarks.length : 0,
+                    leftHand: results.leftHandLandmarks ? results.leftHandLandmarks.length : 0,
+                    rightHand: results.rightHandLandmarks ? results.rightHandLandmarks.length : 0
+                });
+
+                // Prepare keypoint data for streaming to backend
+                const keypointData = this.prepareKeypointData(results);
+                
+                // Stream keypoints to backend via Socket.IO
+                if (this.socket && this.socket.connected && keypointData) {
+                    this.socket.emit('asl_keypoints', keypointData);
+                    console.log('Sending ASL keypoints to backend:', keypointData);
+                }
+            };
+
+            // Start processing video frames
+            this.processVideoFrames();
+            
+            this.aslToSpeechStatus.textContent = 'Processing ASL...';
+            this.updateStatus('ASL recognition started with MediaPipe Holistic', 'success');
+            
+        } catch (error) {
+            console.error('Error starting ASL recognition:', error);
+            this.updateStatus(`Failed to start ASL recognition: ${error.message}`, 'error');
+            this.aslToSpeechStatus.textContent = 'ASL recognition error';
+        }
     }
 
     stopAslRecognition() {
-        this.aslToSpeechStatus.textContent = 'ASL recognition inactive (placeholder)';
-        this.updateStatus('ASL recognition stopped (placeholder)', 'info');
+        try {
+            if (this.holistic) {
+                this.holistic.close();
+                this.holistic = null;
+            }
+            
+            // Clear the canvas
+            if (this.localCanvasCtx) {
+                this.localCanvasCtx.clearRect(0, 0, this.localCanvas.width, this.localCanvas.height);
+            }
+            
+            this.aslToSpeechStatus.textContent = 'ASL recognition stopped';
+            this.updateStatus('ASL recognition stopped', 'info');
+            
+        } catch (error) {
+            console.error('Error stopping ASL recognition:', error);
+            this.updateStatus(`Error stopping ASL recognition: ${error.message}`, 'error');
+        }
+    }
+
+    // Process video frames for MediaPipe
+    processVideoFrames() {
+        const sendFrame = async () => {
+            if (this.holistic && this.localVideo.readyState >= 2) { // Video has data
+                try {
+                    await this.holistic.send({image: this.localVideo});
+                } catch (error) {
+                    console.error('Error sending frame to MediaPipe:', error);
+                }
+            }
+            
+            // Continue processing frames
+            if (this.holistic) {
+                requestAnimationFrame(sendFrame);
+            }
+        };
+        
+        sendFrame();
+    }
+
+    // Draw landmarks on canvas (backup method if MediaPipe drawing utils not available)
+    drawLandmarks(ctx, landmarks, style = {}) {
+        const {color = '#FF0000', lineWidth = 2, radius = 3} = style;
+        
+        ctx.fillStyle = color;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lineWidth;
+        
+        // Draw landmark points
+        landmarks.forEach((landmark) => {
+            const x = landmark.x * this.localCanvas.width;
+            const y = landmark.y * this.localCanvas.height;
+            
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, 2 * Math.PI);
+            ctx.fill();
+        });
+    }
+
+    // Prepare keypoint data for streaming to backend
+    prepareKeypointData(results) {
+        try {
+            const keypointData = {
+                timestamp: Date.now(),
+                pose: null,
+                leftHand: null,
+                rightHand: null
+            };
+
+            // Process pose landmarks (33 points with visibility)
+            if (results.poseLandmarks && results.poseLandmarks.length > 0) {
+                keypointData.pose = results.poseLandmarks.map((landmark, index) => ({
+                    id: index,
+                    x: parseFloat(landmark.x.toFixed(4)),
+                    y: parseFloat(landmark.y.toFixed(4)),
+                    z: parseFloat(landmark.z.toFixed(4)),
+                    visibility: parseFloat((landmark.visibility || 0).toFixed(4))
+                }));
+            }
+
+            // Process left hand landmarks (21 points)
+            if (results.leftHandLandmarks && results.leftHandLandmarks.length > 0) {
+                keypointData.leftHand = results.leftHandLandmarks.map((landmark, index) => ({
+                    id: index,
+                    x: parseFloat(landmark.x.toFixed(4)),
+                    y: parseFloat(landmark.y.toFixed(4)),
+                    z: parseFloat(landmark.z.toFixed(4))
+                }));
+            }
+
+            // Process right hand landmarks (21 points)
+            if (results.rightHandLandmarks && results.rightHandLandmarks.length > 0) {
+                keypointData.rightHand = results.rightHandLandmarks.map((landmark, index) => ({
+                    id: index,
+                    x: parseFloat(landmark.x.toFixed(4)),
+                    y: parseFloat(landmark.y.toFixed(4)),
+                    z: parseFloat(landmark.z.toFixed(4))
+                }));
+            }
+
+            // Only return data if we have at least one set of landmarks
+            if (keypointData.pose || keypointData.leftHand || keypointData.rightHand) {
+                return keypointData;
+            }
+
+            return null;
+        } catch (error) {
+            console.error('Error preparing keypoint data:', error);
+            return null;
+        }
     }
 
     // --- UI Initialization and Settings ---
