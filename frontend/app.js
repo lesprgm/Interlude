@@ -760,35 +760,46 @@ class InterludeApp {
                 // Clear the canvas
                 this.localCanvasCtx.clearRect(0, 0, this.localCanvas.width, this.localCanvas.height);
                 
-                // Draw landmarks
+                // Draw landmarks using MediaPipe's drawing utilities or fallback
                 if (results.poseLandmarks) {
                     this.drawLandmarks(this.localCanvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2, radius: 3});
+                    console.log('Pose landmarks detected:', results.poseLandmarks.length, 'points');
                 }
                 
                 if (results.leftHandLandmarks) {
                     this.drawLandmarks(this.localCanvasCtx, results.leftHandLandmarks, {color: '#00FF00', lineWidth: 2, radius: 3});
+                    console.log('Left hand landmarks detected:', results.leftHandLandmarks.length, 'points');
                 }
                 
                 if (results.rightHandLandmarks) {
                     this.drawLandmarks(this.localCanvasCtx, results.rightHandLandmarks, {color: '#0000FF', lineWidth: 2, radius: 3});
+                    console.log('Right hand landmarks detected:', results.rightHandLandmarks.length, 'points');
                 }
+
+                // Add console log to verify keypoints are being captured
+                console.log('MediaPipe Results:', {
+                    pose: results.poseLandmarks ? results.poseLandmarks.length : 0,
+                    leftHand: results.leftHandLandmarks ? results.leftHandLandmarks.length : 0,
+                    rightHand: results.rightHandLandmarks ? results.rightHandLandmarks.length : 0
+                });
 
                 // Prepare and stream keypoint data to backend
                 const keypointData = this.prepareKeypointData(results);
                 if (this.socket && this.socket.connected && keypointData) {
                     this.socket.emit('asl_keypoints', keypointData);
+                    console.log('Sending ASL keypoints:', keypointData);
                 }
             };
 
-            // Set MediaPipe options for optimal detection
+            // Set MediaPipe options as specified in requirements
             this.holistic.setOptions({
                 modelComplexity: 1,
                 smoothLandmarks: true,
                 enableSegmentation: false,
                 smoothSegmentation: false,
-                refineFaceLandmarks: true,
-                minDetectionConfidence: 0.05,
-                minTrackingConfidence: 0.05
+                refineFaceLandmarks: false,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
             });
 
             // Start processing video frames after MediaPipe initialization
@@ -827,23 +838,26 @@ class InterludeApp {
         }
     }
 
-            // Process video frames for MediaPipe
+            // Process video frames for MediaPipe (Camera-like implementation)
         processVideoFrames() {
             const sendFrame = async () => {
                 if (this.holistic && this.localVideo.readyState >= 2) {
                     try {
+                        // Send video frame to MediaPipe Holistic for processing
                         await this.holistic.send({image: this.localVideo});
                     } catch (error) {
                         console.error('Error sending frame to MediaPipe:', error);
                     }
                 }
                 
-                // Continue processing frames
+                // Continue processing frames using requestAnimationFrame (manual camera implementation)
                 if (this.holistic) {
                     requestAnimationFrame(sendFrame);
                 }
             };
             
+            // Start the camera-like frame processing
+            console.log('Starting MediaPipe camera processing...');
             sendFrame();
         }
 
