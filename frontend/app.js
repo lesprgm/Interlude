@@ -219,6 +219,23 @@ class InterludeApp {
                 }
             });
 
+            // ASL Prediction Handler - Display recognized signs for hearing users
+            this.socket.on('asl_prediction', (data) => {
+                // Only display ASL predictions for hearing users
+                if (this.userRole === 'hearing') {
+                    // Check if it's a clear signal
+                    if (data.sign === 'CLEAR') {
+                        this.speechToAslStatus.textContent = 'Ready';
+                        console.log('ASL prediction cleared');
+                    } else {
+                        // Display the recognized sign with confidence
+                        const confidencePercentage = Math.round(data.confidence * 100);
+                        this.speechToAslStatus.textContent = `ASL: ${data.sign} (${confidencePercentage}%)`;
+                        console.log(`ASL Prediction received: ${data.sign} with ${confidencePercentage}% confidence`);
+                    }
+                }
+            });
+
         } catch (error) {
             console.error('Failed to initialize Socket.IO:', error);
             this.updateStatus('Failed to connect to signaling server', 'error');
