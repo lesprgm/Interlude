@@ -7,10 +7,16 @@ import logging
 import numpy as np
 import tensorflow as tf # Required for building the LSTM model structure
 import random # For simulating predictions
+import os # NEW: For accessing environment variables
 
-# Import SpeechAsyncClient for asynchronous operations
+# Import SpeechAsyncClient for asynchronous operations (STT remains Google Cloud)
 from google.cloud import speech_v1p1beta1 as speech
 from google.cloud.speech_v1p1beta1 import SpeechAsyncClient
+
+# NEW: Import httpx for making asynchronous HTTP requests to Eleven Labs
+import httpx
+
+# Removed: from google.cloud import texttospeech_v1beta1 as texttospeech
 from asyncio import Queue
 
 # Configure logging
@@ -57,9 +63,9 @@ async def get_status():
         "connected_users": len(sio.manager.connected_sockets) # Total connected clients
     }
 
-# Dictionary to store audio queues for each user
+# Dictionary to store audio queues for each user (for STT)
 audio_queues = {}
-# Dictionary to store speech recognition streams for each user
+# Dictionary to store speech recognition streams for each user (for STT)
 speech_streams = {}
 # Dictionary to store ASL keypoint buffers for each user
 keypoint_buffers = {}
@@ -190,66 +196,47 @@ async def connect(sid, environ):
     logger.info(f"Client connected: {sid}")
 
 @sio.on('disconnect')
-async def disconnect(sid, reason): # FIX: Added 'reason' argument to match Socket.IO signature
+async def disconnect(sid, reason):
     logger.info(f"Client disconnected: {sid} (Reason: {reason})")
     
-    # Retrieve room_id and user_role from session before cleanup
     session = await sio.get_session(sid)
     room_id = session.get('room_id')
     user_role = session.get('user_role')
 
-    # Clean up STT stream if exists
     if sid in speech_streams:
-        # Signal the generator to stop by putting None into its queue
         if sid in audio_queues:
             await audio_queues[sid].put(None)
             del audio_queues[sid]
-        # The async for loop in run_stt_stream will then exit gracefully
         del speech_streams[sid]
 
-    # Clean up keypoint buffer
     if sid in keypoint_buffers:
         del keypoint_buffers[sid]
     
-    # Explicitly leave the room
     if room_id:
-        # Get current participants in the room before leaving to notify others
-        # FIX: Use sio.manager.rooms for robust participant check
         room_clients_before_disconnect = sio.manager.rooms['/'].get(room_id, set())
         
-        await sio.leave_room(sid, room_id) # AWAIT this call
+        await sio.leave_room(sid, room_id)
         logger.info(f"Client {sid} left room {room_id}.")
 
-        # Notify remaining user in the room that a user left
-        # Get participants *after* the current user has left
-        # FIX: Use sio.manager.rooms for robust participant check
         remaining_users_in_room = sio.manager.rooms['/'].get(room_id, set())
         if remaining_users_in_room:
-            # There should be only one other user if it's a 2-person room
-            other_sid = list(remaining_users_in_room)[0] # Get the only remaining SID
+            other_sid = list(remaining_users_in_room)[0]
             await sio.emit('user-left', {'userId': sid}, room=other_sid)
             logger.info(f"Notified {other_sid} that {sid} left room {room_id}.")
         else:
-            # If the room becomes empty, Socket.IO manager will clean it up internally,
-            # but we can log for clarity.
             logger.info(f"Room {room_id} is now empty.")
     
-    # FIX: Removed await sio.delete_session(sid) as it's not a valid method
-    # Socket.IO handles session cleanup automatically on disconnect.
-
 
 @sio.on('join_room')
 async def join_room(sid, data):
     room_id = data.get('roomId')
     user_role = data.get('userRole')
     
-    if not room_id or not user_role: # Ensure user_role is also provided
+    if not room_id or not user_role:
         await sio.emit('error', {'message': 'Room ID and user role are required'}, room=sid)
         logger.warning(f"Client {sid} tried to join room without roomId or userRole.")
         return
 
-    # Get current room participants using the correct method
-    # FIX: Use sio.manager.rooms to get participants
     current_room_participants = sio.manager.rooms['/'].get(room_id, set())
     
     if len(current_room_participants) >= 2:
@@ -257,45 +244,36 @@ async def join_room(sid, data):
         logger.warning(f"Room {room_id} is full. User {sid} cannot join.")
         return
 
-    # Join the room - AWAIT this call
     await sio.enter_room(sid, room_id)
     
-    # Store user role and room in the session for later retrieval
-    # FIX: Correct session management: get, modify, then save
     session = await sio.get_session(sid)
     session['room_id'] = room_id
     session['user_role'] = user_role
-    await sio.save_session(sid, session) # AWAIT this call
+    await sio.save_session(sid, session)
 
-    # Get participants *after* the current user has joined, using the correct method
-    # FIX: Use sio.manager.rooms to get participants
     all_participants_in_room = sio.manager.rooms['/'].get(room_id, set())
     current_room_size = len(all_participants_in_room)
     logger.info(f"User {sid} (Role: {user_role}) joined room {room_id}. Current room size: {current_room_size}")
 
-    # Notify other users in the room
     other_sids_in_room = [client_sid for client_sid in all_participants_in_room if client_sid != sid]
     
     if other_sids_in_room:
-        # If there's another user, tell them a new user joined
         for other_sid in other_sids_in_room:
             await sio.emit('user-joined', {'userId': sid}, room=other_sid)
             logger.info(f"Notified {other_sid} about new user {sid} joining room {room_id}.")
-        # And tell the new user about the existing user (the initiator)
         await sio.emit('user-ready', {'userId': other_sids_in_room[0]}, room=sid)
         logger.info(f"Notified {sid} about existing user {other_sids_in_room[0]} in room {room_id}.")
     else:
-        # If no other users, just confirm join to the current user
-        await sio.emit('user-ready', {'userId': sid}, room=sid) # Send own ID to confirm join
+        await sio.emit('user-ready', {'userId': sid}, room=sid)
         logger.info(f"User {sid} is the first in room {room_id}.")
 
 
 # --- Speech-to-Text (STT) Event Handlers ---
 @sio.on('start_audio_stream')
-async def start_audio_stream_handler(sid, data=None): # Renamed to avoid confusion with the async function below
+async def start_audio_stream_handler(sid, data=None):
     logger.info(f"Received start_audio_stream from {sid}")
     session = await sio.get_session(sid)
-    user_role = session.get('user_role') # Get role from session
+    user_role = session.get('user_role')
 
     if user_role != 'hearing':
         logger.warning(f"User {sid} (role: {user_role}) attempted to start audio stream but is not a 'hearing' user.")
@@ -307,8 +285,6 @@ async def start_audio_stream_handler(sid, data=None): # Renamed to avoid confusi
         await sio.emit('audio-stream-started', {'status': 'success'}, room=sid)
         return
 
-    # IMPORTANT FIX: Run the actual STT processing in a background task
-    # This prevents the Socket.IO event handler from blocking while waiting for STT responses.
     sio.start_background_task(run_stt_stream, sid)
     await sio.emit('audio-stream-started', {'status': 'success'}, room=sid)
 
@@ -318,45 +294,39 @@ async def run_stt_stream(sid):
     This function should be run as a background task.
     """
     logger.info(f"Starting background STT stream for {sid}")
-    session = await sio.get_session(sid) # Re-fetch session to ensure latest data
+    session = await sio.get_session(sid)
     room_id = session.get('room_id')
 
     try:
         client = SpeechAsyncClient()
         config = speech.RecognitionConfig(
             encoding=speech.RecognitionConfig.AudioEncoding.WEBM_OPUS,
-            sample_rate_hertz=48000, # Ensure this matches frontend MediaRecorder
+            sample_rate_hertz=48000,
             language_code="en-US",
             enable_automatic_punctuation=True,
-            model="default" # "video" or "phone_call" might be better depending on audio characteristics
+            model="default"
         )
         streaming_config = speech.StreamingRecognitionConfig(
             config=config,
-            interim_results=True # Get interim results for real-time display
+            interim_results=True
         )
 
-        # Create a new audio queue for this session if it doesn't exist
         if sid not in audio_queues:
             audio_queues[sid] = asyncio.Queue()
         audio_queue = audio_queues[sid]
 
-        # FIX: The first request must contain the streaming_config.
-        # Subsequent requests only contain audio_content.
         async def request_generator():
-            # Yield the first request with the config
             yield speech.StreamingRecognizeRequest(streaming_config=streaming_config)
             
-            # Then yield subsequent audio chunks
             while True:
                 chunk = await audio_queue.get()
-                if chunk is None: # Signal to close the stream
+                if chunk is None:
                     logger.info(f"Received None chunk for {sid}, stopping STT request generator.")
                     break
                 yield speech.StreamingRecognizeRequest(audio_content=chunk)
 
-        # FIX: AWAIT the client.streaming_recognize() call
         responses = await client.streaming_recognize(request_generator())
-        speech_streams[sid] = responses # Store the response iterator for cleanup
+        speech_streams[sid] = responses
 
         async for response in responses:
             if not response.results:
@@ -368,30 +338,25 @@ async def run_stt_stream(sid):
 
             logger.info(f"STT Result for {sid}: {'(Final)' if is_final else '(Interim)'} {transcript}")
             
-            # Emit transcribed text to the room (for the deaf user)
             if room_id:
-                # Find the 'deaf' user in the room using the correct method
                 room_clients = sio.manager.rooms['/'].get(room_id, set())
                 for client_sid in room_clients:
                     client_session = await sio.get_session(client_sid)
                     if client_session.get('user_role') == 'deaf' and client_sid != sid:
                         await sio.emit('transcribed_text', {'text': transcript, 'isFinal': is_final}, room=client_sid)
-                        break # Assume only one deaf user per room for now
+                        break
 
     except Exception as e:
         logger.error(f"Error in background STT stream for {sid}: {e}", exc_info=True)
         await sio.emit('audio-stream-error', {'error': str(e)}, room=sid)
     finally:
         logger.info(f"Background STT stream for {sid} finished/stopped.")
-        # Ensure cleanup in case of error or normal termination
         if sid in audio_queues:
-            # If the stream stopped due to an error, ensure the queue is cleared
-            # and potentially put None if it wasn't already to unblock generator
             if not audio_queues[sid].empty():
                 try:
                     await audio_queues[sid].put(None)
                 except Exception:
-                    pass # Ignore if queue is already closed/deleted
+                    pass
             del audio_queues[sid]
         if sid in speech_streams:
             del speech_streams[sid]
@@ -399,11 +364,8 @@ async def run_stt_stream(sid):
 
 @sio.on('send_audio_chunk')
 async def send_audio_chunk(sid, data):
-    # logger.info(f"Received audio chunk from {sid}, size: {len(data)} bytes")
     if sid in audio_queues:
         await audio_queues[sid].put(data)
-        # Removed 'audio-chunk-received' emit to reduce unnecessary network traffic
-        # await sio.emit('audio-chunk-received', {'status': 'success'}, room=sid)
     else:
         logger.warning(f"Audio queue not found for {sid}. Chunk discarded. Has start_audio_stream been called?")
 
@@ -411,10 +373,56 @@ async def send_audio_chunk(sid, data):
 async def end_audio_stream(sid):
     logger.info(f"Received end_audio_stream from {sid}")
     if sid in audio_queues:
-        await audio_queues[sid].put(None) # Signal to close the generator
+        await audio_queues[sid].put(None)
         del audio_queues[sid]
-    # The speech_streams entry will be cleaned up by the run_stt_stream background task's finally block
     await sio.emit('audio-stream-stopped', {'status': 'success'}, room=sid)
+
+# --- NEW: Eleven Labs Text-to-Speech (TTS) Function ---
+async def synthesize_speech_elevenlabs(text_to_synthesize: str) -> bytes:
+    """
+    Synthesizes speech from the given text using Eleven Labs API.
+    Returns the raw audio content as bytes (MP3 format).
+    """
+    ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+    if not ELEVENLABS_API_KEY:
+        logger.error("ELEVENLABS_API_KEY environment variable not set.")
+        return b''
+
+    # You can find voice_id in Eleven Labs dashboard -> VoiceLab -> Add Voice -> Use Pre-made Voice
+    # Example: 'Rachel' voice_id
+    VOICE_ID = "21m00Tcm4TlvDq8ikWAM" # Replace with your preferred voice ID
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
+    headers = {
+        "Accept": "audio/mpeg",
+        "Content-Type": "application/json",
+        "xi-api-key": ELEVENLABS_API_KEY
+    }
+    data = {
+        "text": text_to_synthesize,
+        "model_id": "eleven_monolingual_v1", # Or "eleven_multilingual_v2" if needed
+        "voice_settings": {
+            "stability": 0.5,
+            "similarity_boost": 0.75
+        }
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=headers, json=data, timeout=10.0) # Added timeout
+            response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
+            logger.info(f"Successfully synthesized speech for text: '{text_to_synthesize}' via Eleven Labs.")
+            return response.content # Returns MP3 audio bytes
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"HTTP error synthesizing speech with Eleven Labs for '{text_to_synthesize}': {e.response.status_code} - {e.response.text}", exc_info=True)
+        return b''
+    except httpx.RequestError as e:
+        logger.error(f"Network error synthesizing speech with Eleven Labs for '{text_to_synthesize}': {e}", exc_info=True)
+        return b''
+    except Exception as e:
+        logger.error(f"Unexpected error synthesizing speech with Eleven Labs for '{text_to_synthesize}': {e}", exc_info=True)
+        return b''
 
 # --- ASL Keypoint Event Handler ---
 @sio.on('asl_keypoints')
@@ -441,19 +449,19 @@ async def asl_keypoints(sid, keypoint_data):
     if len(keypoint_buffers[sid]) < asl_recognizer.sequence_length:
         # Not enough data for a full sign, send UNKNOWN or CLEAR if previous was a sign
         last_prediction_info = session.get('last_asl_prediction', {'label': None, 'confidence': 0.0})
-        if last_prediction_info['label'] not in ['UNKNOWN', 'CLEAR', None]: # Check if last was a real sign
+        if last_prediction_info['label'] not in ['UNKNOWN', 'CLEAR', None]:
             logger.info(f"ASL Prediction for {sid}: Not enough data, sending CLEAR.")
             room_id = session.get('room_id')
             if room_id:
-                # FIX: Use sio.manager.rooms for robust participant check
                 room_clients = sio.manager.rooms['/'].get(room_id, set())
                 for client_sid in room_clients:
                     client_session = await sio.get_session(client_sid)
                     if client_session.get('user_role') == 'hearing' and client_sid != sid:
                         await sio.emit('asl_prediction', {'sign': 'CLEAR', 'confidence': 0.0}, room=client_sid)
+                        # Optionally, send a silent audio chunk or a specific signal to stop TTS playback on frontend
+                        # await sio.emit('synthesized_audio_chunk', b'', room=client_sid)
                         break
-            # FIX: Correct session management: get, modify, then save
-            session = await sio.get_session(sid) # Re-fetch session to ensure latest
+            session = await sio.get_session(sid)
             session['last_asl_prediction'] = {'label': 'CLEAR', 'confidence': 0.0}
             await sio.save_session(sid, session)
         return # Exit early if not enough data
@@ -461,8 +469,6 @@ async def asl_keypoints(sid, keypoint_data):
     # Now, call the model with the current buffer (sequence of frames)
     predicted_label, confidence = asl_recognizer.predict(keypoint_buffers[sid])
     
-    # Optimization: Only send prediction if it's not 'UNKNOWN' and confidence is reasonable,
-    # or if it's a new prediction different from the last one sent.
     last_prediction_info = session.get('last_asl_prediction', {'label': None, 'confidence': 0.0})
     
     should_emit = False
@@ -470,7 +476,6 @@ async def asl_keypoints(sid, keypoint_data):
         if predicted_label != last_prediction_info['label'] or confidence > last_prediction_info['confidence'] + 0.1:
             should_emit = True
     elif predicted_label == 'UNKNOWN' and last_prediction_info['label'] not in ['UNKNOWN', 'CLEAR', None]:
-        # If current is UNKNOWN and last was a real sign, send CLEAR signal
         predicted_label = 'CLEAR' # Use 'CLEAR' for frontend signal
         confidence = 0.0
         should_emit = True
@@ -478,25 +483,41 @@ async def asl_keypoints(sid, keypoint_data):
     if should_emit:
         logger.info(f"ASL Prediction for {sid}: '{predicted_label}' with confidence {confidence:.2f}")
         
-        # Emit the prediction to the hearing user in the same room
         room_id = session.get('room_id')
         if room_id:
-            # FIX: Use sio.manager.rooms for robust participant check
             room_clients = sio.manager.rooms['/'].get(room_id, set())
             for client_sid in room_clients:
                 client_session = await sio.get_session(client_sid)
                 if client_session.get('user_role') == 'hearing' and client_sid != sid:
+                    # Emit the text prediction to the hearing user
                     await sio.emit('asl_prediction', {
                         'sign': predicted_label,
                         'confidence': confidence
                     }, room=client_sid)
-                    break # Assume one hearing user per room for now
+
+                    # NEW: If a valid sign is predicted (not UNKNOWN/CLEAR), synthesize speech and send it
+                    if predicted_label not in ['UNKNOWN', 'CLEAR']:
+                        # Run TTS in a background task to avoid blocking the ASL keypoint processing
+                        sio.start_background_task(send_synthesized_speech, client_sid, predicted_label)
+                    break
         
-        # Update last prediction in session - AWAIT this call
-        # FIX: Correct session management: get, modify, then save
-        session = await sio.get_session(sid) # Re-fetch session to ensure latest
+        session = await sio.get_session(sid)
         session['last_asl_prediction'] = {'label': predicted_label, 'confidence': confidence}
         await sio.save_session(sid, session)
+
+# NEW: Background task to synthesize and send speech
+async def send_synthesized_speech(target_sid: str, text: str):
+    """Synthesizes speech and sends it to the target SID."""
+    logger.info(f"Attempting to synthesize speech for '{text}' and send to {target_sid}")
+    # Call the Eleven Labs synthesis function
+    audio_content = await synthesize_speech_elevenlabs(text)
+    if audio_content:
+        # Send the raw audio bytes. Frontend will need to play this.
+        # IMPORTANT: Eleven Labs returns MP3. Frontend will need to handle MP3 playback.
+        await sio.emit('synthesized_audio_chunk', audio_content, room=target_sid)
+        logger.info(f"Sent {len(audio_content)} bytes of synthesized audio for '{text}' to {target_sid}")
+    else:
+        logger.warning(f"No audio content synthesized for '{text}'. Not sending.")
 
 
 # WebRTC Signaling Events (Remain unchanged)
