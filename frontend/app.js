@@ -27,6 +27,11 @@ class InterludeApp {
         this.localCanvas = null;
         this.localCanvasCtx = null;
         
+        // TTS Audio Playback for hearing users
+        this.audioContext = null;
+        this.audioQueue = [];
+        this.isPlayingAudio = false;
+        
         // WebRTC Configuration with STUN servers
         this.rtcConfiguration = {
             iceServers: [
@@ -233,6 +238,15 @@ class InterludeApp {
                         this.speechToAslStatus.textContent = `ASL: ${data.sign} (${confidencePercentage}%)`;
                         console.log(`ASL Prediction received: ${data.sign} with ${confidencePercentage}% confidence`);
                     }
+                }
+            });
+
+            // TTS Audio Playback Handler - Play synthesized speech for hearing users
+            this.socket.on('synthesized_audio_chunk', async (audioData) => {
+                // Only play audio for hearing users
+                if (this.userRole === 'hearing') {
+                    console.log(`TTS Audio received: ${audioData.length} bytes`);
+                    await this.playTTSAudio(audioData);
                 }
             });
 
@@ -808,15 +822,19 @@ class InterludeApp {
                 }
             };
 
-            // Set MediaPipe options as specified in requirements
+            // Enhanced MediaPipe options for improved ASL recognition accuracy
             this.holistic.setOptions({
-                modelComplexity: 1,
-                smoothLandmarks: true,
-                enableSegmentation: false,
+                modelComplexity: 1,                    // Balance between speed and accuracy
+                smoothLandmarks: true,                 // Reduce jitter in hand movements
+                enableSegmentation: false,             // Not needed for ASL recognition
                 smoothSegmentation: false,
-                refineFaceLandmarks: false,
-                minDetectionConfidence: 0.5,
-                minTrackingConfidence: 0.5
+                refineFaceLandmarks: false,            // Focus on hands and pose
+                minDetectionConfidence: 0.7,           // Higher threshold for more confident detections
+                minTrackingConfidence: 0.5,            // Allow tracking to continue with lower confidence
+                staticImageMode: false,                // Enable video mode for better temporal consistency
+                maxNumHands: 2,                        // Ensure both hands can be detected
+                minHandDetectionConfidence: 0.7,       // Higher hand detection confidence
+                minHandPresenceConfidence: 0.5         // Lower presence confidence to maintain tracking
             });
 
             // Start processing video frames after MediaPipe initialization
@@ -855,13 +873,35 @@ class InterludeApp {
         }
     }
 
-            // Process video frames for MediaPipe (Camera-like implementation)
+            // Enhanced video frame processing with quality control and frame rate optimization
         processVideoFrames() {
+            let frameCount = 0;
+            let lastFrameTime = 0;
+            const targetFPS = 15; // Optimized for ASL recognition (balance between accuracy and performance)
+            const frameInterval = 1000 / targetFPS;
+            
             const sendFrame = async () => {
+                const currentTime = performance.now();
+                
                 if (this.holistic && this.localVideo.readyState >= 2) {
                     try {
-                        // Send video frame to MediaPipe Holistic for processing
-                        await this.holistic.send({image: this.localVideo});
+                        // Frame rate control for optimal ASL processing
+                        if (currentTime - lastFrameTime >= frameInterval) {
+                            // Check video quality before processing
+                            const videoQuality = this.assessVideoQuality();
+                            
+                            if (videoQuality.isGoodForASL) {
+                                // Send video frame to MediaPipe Holistic for processing
+                                await this.holistic.send({image: this.localVideo});
+                                lastFrameTime = currentTime;
+                                frameCount++;
+                                
+                                // Log processing stats every 5 seconds
+                                if (frameCount % (targetFPS * 5) === 0) {
+                                    console.log(`ASL Processing: ${frameCount} frames processed. Quality: ${videoQuality.score}/10`);
+                                }
+                            }
+                        }
                     } catch (error) {
                         console.error('Error sending frame to MediaPipe:', error);
                     }
@@ -873,9 +913,110 @@ class InterludeApp {
                 }
             };
             
-            // Start the camera-like frame processing
-            console.log('Starting MediaPipe camera processing...');
+            // Start the enhanced camera-like frame processing
+            console.log('Starting enhanced MediaPipe camera processing with quality control...');
             sendFrame();
+        }
+
+        // Assess video quality for ASL recognition suitability
+        assessVideoQuality() {
+            try {
+                const video = this.localVideo;
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                // Sample a small portion of the video for quality assessment
+                canvas.width = 160;
+                canvas.height = 120;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageData.data;
+                
+                // Calculate brightness and contrast metrics
+                let brightness = 0;
+                let totalVariance = 0;
+                
+                for (let i = 0; i < data.length; i += 4) {
+                    const luminance = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                    brightness += luminance;
+                }
+                
+                brightness /= (data.length / 4);
+                
+                // Calculate contrast (standard deviation of luminance)
+                for (let i = 0; i < data.length; i += 4) {
+                    const luminance = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                    totalVariance += Math.pow(luminance - brightness, 2);
+                }
+                
+                const contrast = Math.sqrt(totalVariance / (data.length / 4));
+                
+                // Score the quality (0-10 scale)
+                let score = 5; // Start with baseline
+                
+                // Brightness scoring (optimal range: 100-180)
+                if (brightness >= 100 && brightness <= 180) {
+                    score += 2;
+                } else if (brightness >= 80 && brightness <= 200) {
+                    score += 1;
+                } else if (brightness < 60 || brightness > 220) {
+                    score -= 2;
+                }
+                
+                // Contrast scoring (higher is generally better for hand detection)
+                if (contrast > 40) {
+                    score += 2;
+                } else if (contrast > 25) {
+                    score += 1;
+                } else if (contrast < 15) {
+                    score -= 1;
+                }
+                
+                // Video resolution factor
+                if (video.videoWidth >= 640 && video.videoHeight >= 480) {
+                    score += 1;
+                }
+                
+                return {
+                    brightness: Math.round(brightness),
+                    contrast: Math.round(contrast),
+                    score: Math.max(0, Math.min(10, score)),
+                    isGoodForASL: score >= 5,
+                    recommendations: this.getQualityRecommendations(brightness, contrast, score)
+                };
+                
+            } catch (error) {
+                console.error('Error assessing video quality:', error);
+                return {
+                    brightness: 0,
+                    contrast: 0,
+                    score: 5,
+                    isGoodForASL: true, // Default to true to avoid blocking
+                    recommendations: []
+                };
+            }
+        }
+
+        // Provide quality improvement recommendations
+        getQualityRecommendations(brightness, contrast, score) {
+            const recommendations = [];
+            
+            if (brightness < 80) {
+                recommendations.push('Increase lighting - add more light sources');
+            } else if (brightness > 200) {
+                recommendations.push('Reduce lighting - too bright for optimal detection');
+            }
+            
+            if (contrast < 20) {
+                recommendations.push('Improve contrast - try a different background');
+            }
+            
+            if (score < 5) {
+                recommendations.push('Overall video quality is poor for ASL recognition');
+            }
+            
+            return recommendations;
         }
 
     // Draw landmarks on canvas (backup method if MediaPipe drawing utils not available)
@@ -897,49 +1038,66 @@ class InterludeApp {
         });
     }
 
-            // Prepare keypoint data for streaming to backend
+            // Enhanced keypoint data preparation with preprocessing for better ASL recognition
         prepareKeypointData(results) {
             try {
                 const keypointData = {
                     timestamp: Date.now(),
                     pose: null,
                     leftHand: null,
-                    rightHand: null
+                    rightHand: null,
+                    // Additional metadata for improved processing
+                    quality: {
+                        poseVisibility: 0,
+                        handDetectionConfidence: 0,
+                        frameQuality: 'good'
+                    }
                 };
 
-                // Process pose landmarks
+                // Process pose landmarks with quality assessment
                 if (results.poseLandmarks && results.poseLandmarks.length > 0) {
-                    keypointData.pose = results.poseLandmarks.map((landmark, index) => ({
+                    const processedPose = results.poseLandmarks.map((landmark, index) => ({
                         id: index,
                         x: parseFloat(landmark.x.toFixed(4)),
                         y: parseFloat(landmark.y.toFixed(4)),
                         z: parseFloat(landmark.z.toFixed(4)),
                         visibility: parseFloat((landmark.visibility || 0).toFixed(4))
                     }));
+                    
+                    // Calculate average pose visibility for quality assessment
+                    const avgVisibility = processedPose.reduce((sum, lm) => sum + lm.visibility, 0) / processedPose.length;
+                    keypointData.quality.poseVisibility = parseFloat(avgVisibility.toFixed(3));
+                    
+                    // Only include pose landmarks with decent visibility
+                    keypointData.pose = processedPose.filter(lm => lm.visibility > 0.5);
                 }
 
-                // Process left hand landmarks
+                // Process left hand landmarks with normalization
                 if (results.leftHandLandmarks && results.leftHandLandmarks.length > 0) {
-                    keypointData.leftHand = results.leftHandLandmarks.map((landmark, index) => ({
-                        id: index,
-                        x: parseFloat(landmark.x.toFixed(4)),
-                        y: parseFloat(landmark.y.toFixed(4)),
-                        z: parseFloat(landmark.z.toFixed(4))
-                    }));
+                    keypointData.leftHand = this.normalizeHandLandmarks(results.leftHandLandmarks, 'left');
+                    keypointData.quality.handDetectionConfidence += 0.5;
                 }
 
-                // Process right hand landmarks
+                // Process right hand landmarks with normalization
                 if (results.rightHandLandmarks && results.rightHandLandmarks.length > 0) {
-                    keypointData.rightHand = results.rightHandLandmarks.map((landmark, index) => ({
-                        id: index,
-                        x: parseFloat(landmark.x.toFixed(4)),
-                        y: parseFloat(landmark.y.toFixed(4)),
-                        z: parseFloat(landmark.z.toFixed(4))
-                    }));
+                    keypointData.rightHand = this.normalizeHandLandmarks(results.rightHandLandmarks, 'right');
+                    keypointData.quality.handDetectionConfidence += 0.5;
                 }
 
-                // Only return data if we have at least one set of landmarks
-                if (keypointData.pose || keypointData.leftHand || keypointData.rightHand) {
+                // Assess frame quality based on available data
+                const hasGoodPose = keypointData.pose && keypointData.quality.poseVisibility > 0.7;
+                const hasHands = keypointData.leftHand || keypointData.rightHand;
+                
+                if (!hasGoodPose && !hasHands) {
+                    keypointData.quality.frameQuality = 'poor';
+                } else if (hasGoodPose && hasHands) {
+                    keypointData.quality.frameQuality = 'excellent';
+                } else {
+                    keypointData.quality.frameQuality = 'good';
+                }
+
+                // Only return data if we have meaningful landmarks
+                if (keypointData.pose?.length > 0 || keypointData.leftHand || keypointData.rightHand) {
                     return keypointData;
                 }
 
@@ -949,6 +1107,134 @@ class InterludeApp {
                 return null;
             }
         }
+
+        // Normalize hand landmarks relative to wrist for scale and position invariance
+        normalizeHandLandmarks(handLandmarks, handType) {
+            if (!handLandmarks || handLandmarks.length === 0) return null;
+            
+            try {
+                // Wrist is landmark 0 in MediaPipe hand model
+                const wrist = handLandmarks[0];
+                
+                return handLandmarks.map((landmark, index) => ({
+                    id: index,
+                    // Normalize relative to wrist position
+                    x: parseFloat((landmark.x - wrist.x).toFixed(4)),
+                    y: parseFloat((landmark.y - wrist.y).toFixed(4)),
+                    z: parseFloat((landmark.z - wrist.z).toFixed(4)),
+                    // Preserve absolute wrist position for context
+                    abs_x: index === 0 ? parseFloat(landmark.x.toFixed(4)) : undefined,
+                    abs_y: index === 0 ? parseFloat(landmark.y.toFixed(4)) : undefined,
+                    handType: handType
+                }));
+            } catch (error) {
+                console.error(`Error normalizing ${handType} hand landmarks:`, error);
+                return null;
+            }
+        }
+
+    // --- TTS Audio Playback Methods ---
+    async initializeAudioContext() {
+        if (!this.audioContext) {
+            try {
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                console.log('Audio context initialized for TTS playback');
+            } catch (error) {
+                console.error('Failed to initialize audio context:', error);
+            }
+        }
+        
+        // Resume audio context if suspended (required by browser policies)
+        if (this.audioContext.state === 'suspended') {
+            await this.audioContext.resume();
+        }
+    }
+
+    async playTTSAudio(audioData) {
+        try {
+            // Initialize audio context if needed
+            await this.initializeAudioContext();
+            
+            if (!this.audioContext) {
+                console.error('Audio context not available for TTS playback');
+                return;
+            }
+
+            // Convert the binary audio data to ArrayBuffer
+            let arrayBuffer;
+            if (audioData instanceof ArrayBuffer) {
+                arrayBuffer = audioData;
+            } else if (audioData instanceof Uint8Array) {
+                arrayBuffer = audioData.buffer;
+            } else {
+                // Handle base64 or other formats
+                const uint8Array = new Uint8Array(audioData);
+                arrayBuffer = uint8Array.buffer;
+            }
+
+            // Decode the MP3 audio data
+            const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+            
+            // Add to queue and play
+            this.audioQueue.push(audioBuffer);
+            if (!this.isPlayingAudio) {
+                this.playNextAudio();
+            }
+            
+        } catch (error) {
+            console.error('Error playing TTS audio:', error);
+            
+            // Fallback: Use HTML5 audio element for MP3 playback
+            this.playTTSAudioFallback(audioData);
+        }
+    }
+
+    playNextAudio() {
+        if (this.audioQueue.length === 0) {
+            this.isPlayingAudio = false;
+            return;
+        }
+
+        this.isPlayingAudio = true;
+        const audioBuffer = this.audioQueue.shift();
+        
+        // Create audio source and play
+        const source = this.audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(this.audioContext.destination);
+        
+        // Play next audio when current finishes
+        source.onended = () => {
+            this.playNextAudio();
+        };
+        
+        source.start();
+        console.log('Playing TTS audio');
+    }
+
+    playTTSAudioFallback(audioData) {
+        try {
+            // Create a blob from the audio data
+            const blob = new Blob([audioData], { type: 'audio/mpeg' });
+            const audioUrl = URL.createObjectURL(blob);
+            
+            // Create and play audio element
+            const audio = new Audio(audioUrl);
+            audio.play().then(() => {
+                console.log('TTS audio playing via fallback method');
+            }).catch(error => {
+                console.error('Fallback audio playback failed:', error);
+            });
+            
+            // Clean up URL after playback
+            audio.onended = () => {
+                URL.revokeObjectURL(audioUrl);
+            };
+            
+        } catch (error) {
+            console.error('TTS audio fallback playback failed:', error);
+        }
+    }
 
     // --- UI Initialization and Settings ---
     initializeUI() {
