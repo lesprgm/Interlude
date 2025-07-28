@@ -151,6 +151,32 @@
                         <span id="lastPrediction">Last recognized: None</span>
                     </div>
                 </div>
+                
+                <!-- ASL Data Collection Controls -->
+                <div class="asl-controls">
+                    <div class="control-group">
+                        <label for="gestureSelect">Gesture Type:</label>
+                        <select id="gestureSelect">
+                            <option value="hello">Hello</option>
+                            <option value="yes">Yes</option>
+                            <option value="no">No</option>
+                            <option value="thank_you">Thank You</option>
+                            <option value="goodbye">Goodbye</option>
+                        </select>
+                    </div>
+                    
+                    <div class="control-group">
+                        <button id="startRecordingBtn" class="btn btn-primary">Start Recording</button>
+                        <button id="stopRecordingBtn" class="btn btn-secondary" disabled>Stop Recording</button>
+                        <button id="downloadDataBtn" class="btn btn-success">Download Data</button>
+                    </div>
+                    
+                    <div class="status-group">
+                        <div id="recordingStatus">Ready to record</div>
+                        <div>Frames: <span id="frameCount">0</span></div>
+                        <div>Recordings: <span id="datasetCount">0</span></div>
+                    </div>
+                </div>
             </div>
         </main>
 

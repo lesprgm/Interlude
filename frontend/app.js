@@ -94,6 +94,15 @@ class InterludeApp {
         this.recordingStatus = document.getElementById('recordingStatus');
         this.frameCount = document.getElementById('frameCount');
         this.datasetCount = document.getElementById('datasetCount');
+        
+        // Handle missing elements gracefully
+        if (!this.gestureSelect) console.warn('gestureSelect element not found');
+        if (!this.startRecordingBtn) console.warn('startRecordingBtn element not found');
+        if (!this.stopRecordingBtn) console.warn('stopRecordingBtn element not found');
+        if (!this.downloadDataBtn) console.warn('downloadDataBtn element not found');
+        if (!this.recordingStatus) console.warn('recordingStatus element not found');
+        if (!this.frameCount) console.warn('frameCount element not found');
+        if (!this.datasetCount) console.warn('datasetCount element not found');
 
         this.initializeSocket();
         this.bindEventListeners();
@@ -133,9 +142,15 @@ class InterludeApp {
         this.themeToggle.addEventListener('change', () => this.toggleTheme());
         
         // ASL Data Collection event listeners
-        this.startRecordingBtn.addEventListener('click', () => this.startRecording());
-        this.stopRecordingBtn.addEventListener('click', () => this.stopRecording());
-        this.downloadDataBtn.addEventListener('click', () => this.downloadCollectedData());
+        if (this.startRecordingBtn) {
+            this.startRecordingBtn.addEventListener('click', () => this.startRecording());
+        }
+        if (this.stopRecordingBtn) {
+            this.stopRecordingBtn.addEventListener('click', () => this.stopRecording());
+        }
+        if (this.downloadDataBtn) {
+            this.downloadDataBtn.addEventListener('click', () => this.downloadCollectedData());
+        }
         
         // Add event listeners for toggle switch labels/sliders to make them clickable
         this.addToggleSwitchListeners();
@@ -804,8 +819,8 @@ class InterludeApp {
 
     // --- ASL Recognition Integration with MediaPipe Holistic ---
     startAslRecognition() {
-                try {
-            console.log('Starting ASL recognition...');
+        try {
+            console.log('🚀 Starting ASL recognition with enhanced debugging...');
             
             // Initialize MediaPipe Holistic
             this.holistic = new window.Holistic({
@@ -814,39 +829,52 @@ class InterludeApp {
                 }
             });
 
-            // Set up results callback
+            // Set up results callback with enhanced debugging
             this.holistic.onResults = (results) => {
+                console.log('🎉 MEDIAPIPE ONRESULTS CALLED!', {
+                    hasPose: !!results.poseLandmarks,
+                    hasLeftHand: !!results.leftHandLandmarks,
+                    hasRightHand: !!results.rightHandLandmarks,
+                    poseCount: results.poseLandmarks?.length || 0,
+                    leftHandCount: results.leftHandLandmarks?.length || 0,
+                    rightHandCount: results.rightHandLandmarks?.length || 0,
+                    timestamp: Date.now()
+                });
+                
                 // Clear the canvas
                 this.localCanvasCtx.clearRect(0, 0, this.localCanvas.width, this.localCanvas.height);
                 
                 // Draw landmarks using MediaPipe's drawing utilities or fallback
                 if (results.poseLandmarks) {
                     this.drawLandmarks(this.localCanvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2, radius: 3});
-                    console.log('Pose landmarks detected:', results.poseLandmarks.length, 'points');
+                    console.log('🔴 Pose landmarks detected:', results.poseLandmarks.length, 'points');
                 }
                 
                 if (results.leftHandLandmarks) {
                     this.drawLandmarks(this.localCanvasCtx, results.leftHandLandmarks, {color: '#00FF00', lineWidth: 2, radius: 3});
-                    console.log('Left hand landmarks detected:', results.leftHandLandmarks.length, 'points');
+                    console.log('🟢 Left hand landmarks detected:', results.leftHandLandmarks.length, 'points');
                 }
                 
                 if (results.rightHandLandmarks) {
                     this.drawLandmarks(this.localCanvasCtx, results.rightHandLandmarks, {color: '#0000FF', lineWidth: 2, radius: 3});
-                    console.log('Right hand landmarks detected:', results.rightHandLandmarks.length, 'points');
+                    console.log('🔵 Right hand landmarks detected:', results.rightHandLandmarks.length, 'points');
                 }
 
-                // Add console log to verify keypoints are being captured
-                console.log('MediaPipe Results:', {
+                // Enhanced console log to verify keypoints are being captured
+                console.log('📊 MediaPipe Results Summary:', {
                     pose: results.poseLandmarks ? results.poseLandmarks.length : 0,
                     leftHand: results.leftHandLandmarks ? results.leftHandLandmarks.length : 0,
-                    rightHand: results.rightHandLandmarks ? results.rightHandLandmarks.length : 0
+                    rightHand: results.rightHandLandmarks ? results.rightHandLandmarks.length : 0,
+                    totalLandmarks: (results.poseLandmarks?.length || 0) + 
+                                   (results.leftHandLandmarks?.length || 0) + 
+                                   (results.rightHandLandmarks?.length || 0)
                 });
 
                 // Prepare and stream keypoint data to backend
                 const keypointData = this.prepareKeypointData(results);
                 if (this.socket && this.socket.connected && keypointData) {
                     this.socket.emit('asl_keypoints', keypointData);
-                    console.log('Sending ASL keypoints:', keypointData);
+                    console.log('📡 Sending ASL keypoints to backend:', keypointData);
                 }
 
                 // Store keypoint data if recording for training
@@ -857,20 +885,22 @@ class InterludeApp {
                 }
             };
 
-            // Enhanced MediaPipe options for improved ASL recognition accuracy
+            // Enhanced MediaPipe options with LOWERED thresholds for debugging
             this.holistic.setOptions({
                 modelComplexity: 1,                    // Balance between speed and accuracy
                 smoothLandmarks: true,                 // Reduce jitter in hand movements
                 enableSegmentation: false,             // Not needed for ASL recognition
                 smoothSegmentation: false,
                 refineFaceLandmarks: false,            // Focus on hands and pose
-                minDetectionConfidence: 0.7,           // Higher threshold for more confident detections
-                minTrackingConfidence: 0.5,            // Allow tracking to continue with lower confidence
+                minDetectionConfidence: 0.3,           // LOWERED: More sensitive detection for debugging
+                minTrackingConfidence: 0.2,            // LOWERED: More sensitive tracking for debugging
                 staticImageMode: false,                // Enable video mode for better temporal consistency
                 maxNumHands: 2,                        // Ensure both hands can be detected
-                minHandDetectionConfidence: 0.7,       // Higher hand detection confidence
-                minHandPresenceConfidence: 0.5         // Lower presence confidence to maintain tracking
+                minHandDetectionConfidence: 0.3,       // LOWERED: More sensitive hand detection
+                minHandPresenceConfidence: 0.2         // LOWERED: More sensitive presence detection
             });
+
+            console.log('✅ MediaPipe options set with lowered thresholds for debugging');
 
             // Start processing video frames after MediaPipe initialization
             setTimeout(() => {
@@ -878,10 +908,10 @@ class InterludeApp {
             }, 1000);
             
             this.aslToSpeechStatus.textContent = 'Processing ASL...';
-            this.updateStatus('ASL recognition started', 'success');
+            this.updateStatus('ASL recognition started with debugging', 'success');
             
         } catch (error) {
-            console.error('Error starting ASL recognition:', error);
+            console.error('❌ Error starting ASL recognition:', error);
             this.updateStatus(`Failed to start ASL recognition: ${error.message}`, 'error');
             this.aslToSpeechStatus.textContent = 'ASL recognition error';
         }
@@ -908,12 +938,14 @@ class InterludeApp {
         }
     }
 
-            // Enhanced video frame processing with quality control and frame rate optimization
+        // Enhanced video frame processing with debugging and reduced FPS for testing
         processVideoFrames() {
             let frameCount = 0;
             let lastFrameTime = 0;
-            const targetFPS = 15; // Optimized for ASL recognition (balance between accuracy and performance)
+            const targetFPS = 5; // REDUCED: Lower FPS for debugging (was 15)
             const frameInterval = 1000 / targetFPS;
+            
+            console.log(`🔧 Starting video frame processing with ${targetFPS} FPS for debugging`);
             
             const sendFrame = async () => {
                 const currentTime = performance.now();
@@ -922,23 +954,40 @@ class InterludeApp {
                     try {
                         // Frame rate control for optimal ASL processing
                         if (currentTime - lastFrameTime >= frameInterval) {
-                            // Check video quality before processing
-                            const videoQuality = this.assessVideoQuality();
+                            // TEMPORARILY REMOVED: video quality check for debugging
+                            // const videoQuality = this.assessVideoQuality();
+                            // if (videoQuality.isGoodForASL) {
                             
-                            if (videoQuality.isGoodForASL) {
-                                // Send video frame to MediaPipe Holistic for processing
-                                await this.holistic.send({image: this.localVideo});
-                                lastFrameTime = currentTime;
-                                frameCount++;
+                            // Always process frames for debugging
+                            console.log(`📹 Sending frame #${frameCount + 1} to MediaPipe...`);
+                            await this.holistic.send({image: this.localVideo});
+                            lastFrameTime = currentTime;
+                            frameCount++;
+                            
+                            // Log processing stats every 2 seconds (more frequent for debugging)
+                            if (frameCount % (targetFPS * 2) === 0) {
+                                console.log(`📊 ASL Processing: ${frameCount} frames processed. FPS: ${targetFPS}`);
                                 
-                                // Log processing stats every 5 seconds
-                                if (frameCount % (targetFPS * 5) === 0) {
-                                    console.log(`ASL Processing: ${frameCount} frames processed. Quality: ${videoQuality.score}/10`);
-                                }
+                                // Log video element status
+                                console.log('📹 Video element status:', {
+                                    readyState: this.localVideo.readyState,
+                                    videoWidth: this.localVideo.videoWidth,
+                                    videoHeight: this.localVideo.videoHeight,
+                                    paused: this.localVideo.paused,
+                                    ended: this.localVideo.ended
+                                });
                             }
+                            // } // End of temporarily removed quality check
                         }
                     } catch (error) {
-                        console.error('Error sending frame to MediaPipe:', error);
+                        console.error('❌ Error sending frame to MediaPipe:', error);
+                    }
+                } else {
+                    if (!this.holistic) {
+                        console.log('⚠️ MediaPipe holistic not available');
+                    }
+                    if (this.localVideo.readyState < 2) {
+                        console.log('⚠️ Video not ready, readyState:', this.localVideo.readyState);
                     }
                 }
                 
@@ -949,7 +998,7 @@ class InterludeApp {
             };
             
             // Start the enhanced camera-like frame processing
-            console.log('Starting enhanced MediaPipe camera processing with quality control...');
+            console.log('🚀 Starting enhanced MediaPipe camera processing with debugging...');
             sendFrame();
         }
 
@@ -1389,8 +1438,113 @@ class InterludeApp {
     }
 
     downloadCollectedData() {
-        // Skip for now - focus on recognition
-        this.updateStatus('Data collection disabled for demo. Focus on real-time recognition.', 'info');
+        if (this.recordedData.length === 0) {
+            alert('No data recorded yet. Start recording first.');
+            return;
+        }
+
+        const dataStr = JSON.stringify(this.recordedData, null, 2);
+        const dataBlob = new Blob([dataStr], {type: 'application/json'});
+        const url = URL.createObjectURL(dataBlob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `asl_training_data_${Date.now()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        console.log(`Downloaded ${this.recordedData.length} recordings`);
+    }
+
+    // 🔧 DEBUGGING HELPER FUNCTION - Call this from console
+    debugCameraAndMediaPipe() {
+        console.log('🔍 === CAMERA & MEDIAPIPE DEBUG REPORT ===');
+        
+        // Check camera status
+        if (this.localVideo) {
+            console.log('📹 Camera Video Element:', {
+                readyState: this.localVideo.readyState,
+                videoWidth: this.localVideo.videoWidth,
+                videoHeight: this.localVideo.videoHeight,
+                paused: this.localVideo.paused,
+                ended: this.localVideo.ended,
+                srcObject: !!this.localVideo.srcObject,
+                currentTime: this.localVideo.currentTime
+            });
+        } else {
+            console.log('❌ Camera video element not found');
+        }
+        
+        // Check MediaPipe status
+        if (this.holistic) {
+            console.log('✅ MediaPipe Holistic is initialized');
+            
+            // Test if MediaPipe is responding
+            try {
+                console.log('🧪 Testing MediaPipe frame processing...');
+                this.holistic.send({image: this.localVideo}).then(() => {
+                    console.log('✅ MediaPipe frame sent successfully');
+                }).catch((error) => {
+                    console.error('❌ MediaPipe frame send failed:', error);
+                });
+            } catch (error) {
+                console.error('❌ Error testing MediaPipe:', error);
+            }
+        } else {
+            console.log('❌ MediaPipe Holistic not initialized');
+        }
+        
+        // Check socket connection
+        if (this.socket) {
+            console.log('📡 Socket Status:', {
+                connected: this.socket.connected,
+                id: this.socket.id
+            });
+        } else {
+            console.log('❌ Socket not initialized');
+        }
+        
+        // Check canvas
+        if (this.localCanvasCtx) {
+            console.log('🎨 Canvas Status:', {
+                width: this.localCanvas.width,
+                height: this.localCanvas.height,
+                contextType: this.localCanvasCtx.constructor.name
+            });
+        } else {
+            console.log('❌ Canvas context not available');
+        }
+        
+        console.log('🔍 === END DEBUG REPORT ===');
+    }
+
+    // 🧪 MANUAL TEST FUNCTION - Call this from console to test MediaPipe
+    testMediaPipeDetection() {
+        console.log('🧪 === MANUAL MEDIAPIPE TEST ===');
+        
+        if (!this.holistic) {
+            console.log('❌ MediaPipe not initialized. Start ASL recognition first.');
+            return;
+        }
+        
+        if (!this.localVideo || this.localVideo.readyState < 2) {
+            console.log('❌ Camera not ready. Make sure camera is on and working.');
+            return;
+        }
+        
+        console.log('📹 Sending test frame to MediaPipe...');
+        
+        // Send a single frame and see what happens
+        this.holistic.send({image: this.localVideo})
+            .then(() => {
+                console.log('✅ Test frame sent successfully');
+                console.log('👀 Check if you see any landmark detection messages above...');
+            })
+            .catch((error) => {
+                console.error('❌ Test frame failed:', error);
+            });
     }
 }
 
