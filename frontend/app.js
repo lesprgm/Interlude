@@ -841,24 +841,59 @@ class InterludeApp {
                     timestamp: Date.now()
                 });
                 
+                // Save current canvas settings
+                this.localCanvasCtx.save();
+
                 // Clear the canvas
                 this.localCanvasCtx.clearRect(0, 0, this.localCanvas.width, this.localCanvas.height);
                 
-                // Draw landmarks using MediaPipe's drawing utilities or fallback
-                if (results.poseLandmarks) {
-                    this.drawLandmarks(this.localCanvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2, radius: 3});
-                    console.log('🔴 Pose landmarks detected:', results.poseLandmarks.length, 'points');
+                // Use MediaPipe drawing utilities if available
+                if (window.drawConnectors && window.drawLandmarks) {
+                    // Draw pose
+                    if (results.poseLandmarks) {
+                        drawConnectors(this.localCanvasCtx, results.poseLandmarks, POSE_CONNECTIONS,
+                                      {color: '#00FF00', lineWidth: 4});
+                        drawLandmarks(this.localCanvasCtx, results.poseLandmarks,
+                                     {color: '#FF0000', lineWidth: 2, radius: 5});
+                        console.log('🔴 Pose landmarks drawn with MediaPipe utilities');
+                    }
+                    
+                    // Draw hands
+                    if (results.rightHandLandmarks) {
+                        drawConnectors(this.localCanvasCtx, results.rightHandLandmarks, HAND_CONNECTIONS,
+                                      {color: '#00FF00', lineWidth: 5});
+                        drawLandmarks(this.localCanvasCtx, results.rightHandLandmarks,
+                                     {color: '#0000FF', lineWidth: 2, radius: 5});
+                        console.log('🔵 Right hand landmarks drawn with MediaPipe utilities');
+                    }
+                    
+                    if (results.leftHandLandmarks) {
+                        drawConnectors(this.localCanvasCtx, results.leftHandLandmarks, HAND_CONNECTIONS,
+                                      {color: '#FF0000', lineWidth: 5});
+                        drawLandmarks(this.localCanvasCtx, results.leftHandLandmarks,
+                                     {color: '#00FF00', lineWidth: 2, radius: 5});
+                        console.log('🟢 Left hand landmarks drawn with MediaPipe utilities');
+                    }
+                } else {
+                    // Fallback to custom drawing
+                    if (results.poseLandmarks) {
+                        this.drawLandmarks(this.localCanvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2, radius: 3});
+                        console.log('🔴 Pose landmarks drawn with custom method');
+                    }
+                    
+                    if (results.leftHandLandmarks) {
+                        this.drawLandmarks(this.localCanvasCtx, results.leftHandLandmarks, {color: '#00FF00', lineWidth: 2, radius: 3});
+                        console.log('🟢 Left hand landmarks drawn with custom method');
+                    }
+                    
+                    if (results.rightHandLandmarks) {
+                        this.drawLandmarks(this.localCanvasCtx, results.rightHandLandmarks, {color: '#0000FF', lineWidth: 2, radius: 3});
+                        console.log('🔵 Right hand landmarks drawn with custom method');
+                    }
                 }
-                
-                if (results.leftHandLandmarks) {
-                    this.drawLandmarks(this.localCanvasCtx, results.leftHandLandmarks, {color: '#00FF00', lineWidth: 2, radius: 3});
-                    console.log('🟢 Left hand landmarks detected:', results.leftHandLandmarks.length, 'points');
-                }
-                
-                if (results.rightHandLandmarks) {
-                    this.drawLandmarks(this.localCanvasCtx, results.rightHandLandmarks, {color: '#0000FF', lineWidth: 2, radius: 3});
-                    console.log('🔵 Right hand landmarks detected:', results.rightHandLandmarks.length, 'points');
-                }
+
+                // Restore canvas settings
+                this.localCanvasCtx.restore();
 
                 // Enhanced console log to verify keypoints are being captured
                 console.log('📊 MediaPipe Results Summary:', {
@@ -885,22 +920,31 @@ class InterludeApp {
                 }
             };
 
-            // Enhanced MediaPipe options with LOWERED thresholds for debugging
+            // Enhanced MediaPipe options with CORRECT Holistic parameters only
             this.holistic.setOptions({
                 modelComplexity: 1,                    // Balance between speed and accuracy
                 smoothLandmarks: true,                 // Reduce jitter in hand movements
                 enableSegmentation: false,             // Not needed for ASL recognition
                 smoothSegmentation: false,
                 refineFaceLandmarks: false,            // Focus on hands and pose
-                minDetectionConfidence: 0.3,           // LOWERED: More sensitive detection for debugging
-                minTrackingConfidence: 0.2,            // LOWERED: More sensitive tracking for debugging
-                staticImageMode: false,                // Enable video mode for better temporal consistency
-                maxNumHands: 2,                        // Ensure both hands can be detected
-                minHandDetectionConfidence: 0.3,       // LOWERED: More sensitive hand detection
-                minHandPresenceConfidence: 0.2         // LOWERED: More sensitive presence detection
+                minDetectionConfidence: 0.5,           // Standard threshold for detection
+                minTrackingConfidence: 0.5             // Standard threshold for tracking
             });
 
-            console.log('✅ MediaPipe options set with lowered thresholds for debugging');
+            console.log('✅ MediaPipe options set with correct Holistic parameters');
+
+            // Fix canvas dimensions to match video
+            const updateCanvasSize = () => {
+                if (this.localVideo.videoWidth && this.localVideo.videoHeight) {
+                    this.localCanvas.width = this.localVideo.videoWidth;
+                    this.localCanvas.height = this.localVideo.videoHeight;
+                    console.log(`🎨 Canvas resized to: ${this.localCanvas.width}x${this.localCanvas.height}`);
+                }
+            };
+
+            // Call it immediately and when video metadata loads
+            updateCanvasSize();
+            this.localVideo.addEventListener('loadedmetadata', updateCanvasSize);
 
             // Start processing video frames after MediaPipe initialization
             setTimeout(() => {
@@ -1520,6 +1564,45 @@ class InterludeApp {
         console.log('🔍 === END DEBUG REPORT ===');
     }
 
+    // 🔧 DEBUGGING HELPER FUNCTION - Call this from console
+    debugMediaPipe() {
+        console.log('🔍 === MEDIAPIPE DEBUG INFO ===');
+        console.log('Holistic initialized:', !!this.holistic);
+        console.log('Video ready:', this.localVideo.readyState >= 2);
+        console.log('Video dimensions:', {
+            video: {
+                width: this.localVideo.videoWidth,
+                height: this.localVideo.videoHeight
+            },
+            canvas: {
+                width: this.localCanvas.width,
+                height: this.localCanvas.height
+            }
+        });
+
+        // Check MediaPipe utilities
+        console.log('MediaPipe utilities available:', {
+            drawConnectors: typeof window.drawConnectors,
+            drawLandmarks: typeof window.drawLandmarks,
+            POSE_CONNECTIONS: typeof window.POSE_CONNECTIONS,
+            HAND_CONNECTIONS: typeof window.HAND_CONNECTIONS
+        });
+
+        // Try a single frame detection
+        if (this.holistic && this.localVideo.readyState >= 2) {
+            console.log('📹 Sending test frame...');
+            this.holistic.send({image: this.localVideo}).then(() => {
+                console.log('✅ Test frame sent successfully');
+            }).catch(err => {
+                console.error('❌ Test frame failed:', err);
+            });
+        } else {
+            console.log('❌ Cannot send test frame - holistic or video not ready');
+        }
+        
+        console.log('🔍 === END MEDIAPIPE DEBUG ===');
+    }
+
     // 🧪 MANUAL TEST FUNCTION - Call this from console to test MediaPipe
     testMediaPipeDetection() {
         console.log('🧪 === MANUAL MEDIAPIPE TEST ===');
@@ -1544,6 +1627,33 @@ class InterludeApp {
             })
             .catch((error) => {
                 console.error('❌ Test frame failed:', error);
+            });
+    }
+
+    // 🧪 SIMPLE TEST FUNCTION - Call this from console
+    testMediaPipeSimple() {
+        console.log('🧪 === SIMPLE MEDIAPIPE TEST ===');
+        
+        if (!this.holistic) {
+            console.log('❌ Holistic not initialized');
+            return;
+        }
+        
+        if (!this.localVideo || this.localVideo.readyState < 2) {
+            console.log('❌ Video not ready');
+            return;
+        }
+        
+        console.log('📹 Sending single test frame...');
+        
+        // Send a single frame and see if onResults is called
+        this.holistic.send({image: this.localVideo})
+            .then(() => {
+                console.log('✅ Test frame sent successfully');
+                console.log('👀 Check for 🎉 MEDIAPIPE ONRESULTS CALLED! messages above...');
+            })
+            .catch(err => {
+                console.error('❌ Test frame failed:', err);
             });
     }
 }
