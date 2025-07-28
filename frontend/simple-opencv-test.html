@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple OpenCV Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .video-container {
+            position: relative;
+            margin: 20px 0;
+        }
+        #videoElement {
+            width: 100%;
+            max-width: 640px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+        }
+        #canvasElement {
+            position: absolute;
+            top: 0;
+            left: 0;
+            border: 2px solid #007bff;
+            border-radius: 5px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .info { background-color: #d1ecf1; color: #0c5460; }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        #log {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+        }
+    </style>
+    
+    <!-- OpenCV.js -->
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Simple OpenCV Test</h1>
+        
+        <div class="status info" id="status">Loading OpenCV.js...</div>
+        
+        <div>
+            <button onclick="startCamera()">Start Camera</button>
+            <button onclick="startProcessing()" disabled id="processBtn">Start Processing</button>
+            <button onclick="stopProcessing()" disabled id="stopBtn">Stop Processing</button>
+        </div>
+        
+        <div class="video-container">
+            <video id="videoElement" autoplay muted playsinline></video>
+            <canvas id="canvasElement"></canvas>
+        </div>
+        
+        <h3>Processing Log:</h3>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        let openCvReady = false;
+        let cameraStream = null;
+        let isProcessing = false;
+        let processingInterval = null;
+        
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${timestamp}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+        
+        function updateStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+            log(message);
+        }
+        
+        function onOpenCvReady() {
+            log('✅ OpenCV.js loaded successfully');
+            openCvReady = true;
+            updateStatus('OpenCV.js ready', 'success');
+        }
+        
+        async function startCamera() {
+            try {
+                updateStatus('Starting camera...', 'info');
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: 640, height: 480 } 
+                });
+                
+                const video = document.getElementById('videoElement');
+                video.srcObject = stream;
+                cameraStream = stream;
+                
+                video.onloadedmetadata = () => {
+                    updateStatus('Camera started successfully', 'success');
+                    document.getElementById('processBtn').disabled = false;
+                    log(`Camera ready: ${video.videoWidth}x${video.videoHeight}`);
+                };
+                
+            } catch (error) {
+                updateStatus('Camera error: ' + error.message, 'error');
+                log('Camera error: ' + error.message);
+            }
+        }
+        
+        function startProcessing() {
+            if (!openCvReady) {
+                log('❌ OpenCV.js not ready');
+                return;
+            }
+            
+            if (!cameraStream) {
+                log('❌ Camera not started');
+                return;
+            }
+            
+            log('🚀 Starting OpenCV processing...');
+            isProcessing = true;
+            document.getElementById('processBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            
+            // Start processing frames
+            processFrame();
+        }
+        
+        function stopProcessing() {
+            log('⏹️ Stopping OpenCV processing...');
+            isProcessing = false;
+            document.getElementById('processBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            
+            // Clear canvas
+            const canvas = document.getElementById('canvasElement');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        
+        function processFrame() {
+            if (!isProcessing) return;
+            
+            try {
+                const video = document.getElementById('videoElement');
+                const canvas = document.getElementById('canvasElement');
+                const ctx = canvas.getContext('2d');
+                
+                // Set canvas size to match video
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                
+                // Draw video frame to canvas
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                // Get image data for OpenCV processing
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const mat = cv.matFromImageData(imageData);
+                
+                // Simple OpenCV processing - convert to grayscale
+                const gray = new cv.Mat();
+                cv.cvtColor(mat, gray, cv.COLOR_RGBA2GRAY);
+                
+                // Draw some simple shapes on the canvas to show it's working
+                ctx.strokeStyle = '#00FF00';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(canvas.width / 2, canvas.height / 2, 50, 0, 2 * Math.PI);
+                ctx.stroke();
+                
+                // Add text to show processing is active
+                ctx.fillStyle = '#FF0000';
+                ctx.font = '20px Arial';
+                ctx.fillText('OpenCV Processing Active', 10, 30);
+                
+                // Clean up OpenCV objects
+                mat.delete();
+                gray.delete();
+                
+                log(`✅ Processed frame: ${canvas.width}x${canvas.height}`);
+                
+            } catch (error) {
+                log('❌ Error processing frame: ' + error.message);
+            }
+            
+            // Continue processing
+            if (isProcessing) {
+                requestAnimationFrame(processFrame);
+            }
+        }
+        
+        // Auto-start camera when page loads
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                if (openCvReady) {
+                    startCamera();
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html> 

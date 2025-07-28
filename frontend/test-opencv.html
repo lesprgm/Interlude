@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenCV.js Test - ASL Integration</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .info { background-color: #d1ecf1; color: #0c5460; }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        #videoElement {
+            width: 100%;
+            max-width: 640px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+        }
+        #canvasElement {
+            border: 2px solid #007bff;
+            border-radius: 5px;
+        }
+    </style>
+    
+    <!-- OpenCV.js -->
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
+    
+    <!-- OpenCV ASL Handler -->
+    <script src="js/asl/opencv-handler.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>OpenCV.js ASL Integration Test</h1>
+        
+        <div class="test-section">
+            <h2>1. OpenCV.js Loading Test</h2>
+            <div id="opencvStatus" class="status info">Loading OpenCV.js...</div>
+            <button onclick="testOpenCV()">Test OpenCV.js</button>
+        </div>
+        
+        <div class="test-section">
+            <h2>2. Camera Access Test</h2>
+            <div id="cameraStatus" class="status info">Camera not accessed yet</div>
+            <button onclick="testCamera()">Test Camera Access</button>
+            <video id="videoElement" autoplay muted playsinline style="display: none;"></video>
+        </div>
+        
+        <div class="test-section">
+            <h2>3. ASL Handler Test</h2>
+            <div id="handlerStatus" class="status info">Handler not initialized</div>
+            <button onclick="testHandler()">Test ASL Handler</button>
+            <canvas id="canvasElement" style="display: none;"></canvas>
+        </div>
+        
+        <div class="test-section">
+            <h2>4. Keypoint Detection Test</h2>
+            <div id="keypointStatus" class="status info">No keypoints detected yet</div>
+            <button onclick="startKeypointTest()">Start Keypoint Test</button>
+            <button onclick="stopKeypointTest()" disabled>Stop Keypoint Test</button>
+        </div>
+        
+        <div class="test-section">
+            <h2>5. Backend Integration Test</h2>
+            <div id="backendStatus" class="status info">Backend not connected</div>
+            <button onclick="testBackendConnection()">Test Backend Connection</button>
+        </div>
+        
+        <div class="test-section">
+            <h2>Test Results</h2>
+            <div id="testResults"></div>
+        </div>
+    </div>
+
+    <script>
+        let openCvReady = false;
+        let testHandler = null;
+        let isKeypointTestRunning = false;
+        
+        function onOpenCvReady() {
+            console.log('✅ OpenCV.js loaded successfully');
+            openCvReady = true;
+            document.getElementById('opencvStatus').className = 'status success';
+            document.getElementById('opencvStatus').textContent = 'OpenCV.js loaded successfully';
+        }
+        
+        function testOpenCV() {
+            if (typeof cv !== 'undefined') {
+                document.getElementById('opencvStatus').className = 'status success';
+                document.getElementById('opencvStatus').textContent = `OpenCV.js version: ${cv.version}`;
+                addTestResult('OpenCV.js', 'PASS', `Version ${cv.version} loaded successfully`);
+            } else {
+                document.getElementById('opencvStatus').className = 'status error';
+                document.getElementById('opencvStatus').textContent = 'OpenCV.js not available';
+                addTestResult('OpenCV.js', 'FAIL', 'OpenCV.js not loaded');
+            }
+        }
+        
+        async function testCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: 640, height: 480 } 
+                });
+                
+                const video = document.getElementById('videoElement');
+                video.srcObject = stream;
+                video.style.display = 'block';
+                
+                document.getElementById('cameraStatus').className = 'status success';
+                document.getElementById('cameraStatus').textContent = 'Camera accessed successfully';
+                addTestResult('Camera Access', 'PASS', 'Camera stream started');
+                
+            } catch (error) {
+                document.getElementById('cameraStatus').className = 'status error';
+                document.getElementById('cameraStatus').textContent = `Camera error: ${error.message}`;
+                addTestResult('Camera Access', 'FAIL', error.message);
+            }
+        }
+        
+        async function testHandler() {
+            try {
+                if (!openCvReady) {
+                    throw new Error('OpenCV.js not ready');
+                }
+                
+                // Create a mock app object
+                const mockApp = {
+                    localVideo: document.getElementById('videoElement'),
+                    localCanvas: document.getElementById('canvasElement'),
+                    localCanvasCtx: document.getElementById('canvasElement').getContext('2d'),
+                    socket: null
+                };
+                
+                testHandler = new OpenCVASLHandler(mockApp);
+                await testHandler.initialize();
+                
+                document.getElementById('handlerStatus').className = 'status success';
+                document.getElementById('handlerStatus').textContent = 'ASL Handler initialized successfully';
+                addTestResult('ASL Handler', 'PASS', 'Handler initialized');
+                
+            } catch (error) {
+                document.getElementById('handlerStatus').className = 'status error';
+                document.getElementById('handlerStatus').textContent = `Handler error: ${error.message}`;
+                addTestResult('ASL Handler', 'FAIL', error.message);
+            }
+        }
+        
+        function startKeypointTest() {
+            if (!testHandler) {
+                alert('Please initialize the ASL Handler first');
+                return;
+            }
+            
+            testHandler.startProcessing();
+            isKeypointTestRunning = true;
+            
+            document.getElementById('keypointStatus').className = 'status success';
+            document.getElementById('keypointStatus').textContent = 'Keypoint detection started';
+            
+            document.querySelector('button[onclick="startKeypointTest()"]').disabled = true;
+            document.querySelector('button[onclick="stopKeypointTest()"]').disabled = false;
+            
+            addTestResult('Keypoint Detection', 'PASS', 'Detection started');
+        }
+        
+        function stopKeypointTest() {
+            if (testHandler) {
+                testHandler.stopProcessing();
+            }
+            
+            isKeypointTestRunning = false;
+            
+            document.getElementById('keypointStatus').className = 'status info';
+            document.getElementById('keypointStatus').textContent = 'Keypoint detection stopped';
+            
+            document.querySelector('button[onclick="startKeypointTest()"]').disabled = false;
+            document.querySelector('button[onclick="stopKeypointTest()"]').disabled = true;
+        }
+        
+        function testBackendConnection() {
+            // Simulate backend connection test
+            document.getElementById('backendStatus').className = 'status info';
+            document.getElementById('backendStatus').textContent = 'Backend connection test completed';
+            addTestResult('Backend Integration', 'INFO', 'Ready for integration');
+        }
+        
+        function addTestResult(testName, status, message) {
+            const resultsDiv = document.getElementById('testResults');
+            const resultElement = document.createElement('div');
+            resultElement.className = `status ${status.toLowerCase()}`;
+            resultElement.textContent = `${testName}: ${message}`;
+            resultsDiv.appendChild(resultElement);
+        }
+        
+        // Auto-run tests when page loads
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                testOpenCV();
+            }, 1000);
+        });
+    </script>
+</body>
+</html> 

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenCV Hand Tracking Debug</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .video-container {
+            position: relative;
+            margin: 20px 0;
+        }
+        #videoElement {
+            width: 100%;
+            max-width: 640px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+        }
+        #canvasElement {
+            position: absolute;
+            top: 0;
+            left: 0;
+            border: 2px solid #007bff;
+            border-radius: 5px;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .info { background-color: #d1ecf1; color: #0c5460; }
+        #debugInfo {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+    
+    <!-- OpenCV.js -->
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
+    
+    <!-- OpenCV ASL Handler -->
+    <script src="js/asl/opencv-handler.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>OpenCV Hand Tracking Debug</h1>
+        
+        <div class="status info" id="status">Initializing...</div>
+        
+        <div class="controls">
+            <button onclick="startCamera()">Start Camera</button>
+            <button onclick="startTracking()" disabled id="startBtn">Start Hand Tracking</button>
+            <button onclick="stopTracking()" disabled id="stopBtn">Stop Hand Tracking</button>
+        </div>
+        
+        <div class="video-container">
+            <video id="videoElement" autoplay muted playsinline></video>
+            <canvas id="canvasElement"></canvas>
+        </div>
+        
+        <h3>Debug Information:</h3>
+        <div id="debugInfo"></div>
+    </div>
+
+    <script>
+        let openCvReady = false;
+        let cameraStream = null;
+        let opencvHandler = null;
+        let isTracking = false;
+        
+        function onOpenCvReady() {
+            console.log('✅ OpenCV.js loaded successfully');
+            openCvReady = true;
+            updateStatus('OpenCV.js ready', 'success');
+        }
+        
+        function updateStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+            logDebug(message);
+        }
+        
+        function logDebug(message) {
+            const debugDiv = document.getElementById('debugInfo');
+            const timestamp = new Date().toLocaleTimeString();
+            debugDiv.innerHTML += `[${timestamp}] ${message}\n`;
+            debugDiv.scrollTop = debugDiv.scrollHeight;
+        }
+        
+        async function startCamera() {
+            try {
+                updateStatus('Starting camera...', 'info');
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: 640, height: 480 } 
+                });
+                
+                const video = document.getElementById('videoElement');
+                video.srcObject = stream;
+                cameraStream = stream;
+                
+                // Wait for video to be ready
+                video.onloadedmetadata = () => {
+                    updateStatus('Camera started successfully', 'success');
+                    document.getElementById('startBtn').disabled = false;
+                    logDebug('Camera ready, video dimensions: ' + video.videoWidth + 'x' + video.videoHeight);
+                };
+                
+            } catch (error) {
+                updateStatus('Camera error: ' + error.message, 'error');
+                logDebug('Camera error: ' + error.message);
+            }
+        }
+        
+        async function startTracking() {
+            try {
+                if (!openCvReady) {
+                    throw new Error('OpenCV.js not ready');
+                }
+                
+                if (!cameraStream) {
+                    throw new Error('Camera not started');
+                }
+                
+                updateStatus('Initializing OpenCV handler...', 'info');
+                
+                // Create mock app object
+                const mockApp = {
+                    localVideo: document.getElementById('videoElement'),
+                    localCanvas: document.getElementById('canvasElement'),
+                    localCanvasCtx: document.getElementById('canvasElement').getContext('2d'),
+                    socket: null
+                };
+                
+                opencvHandler = new OpenCVASLHandler(mockApp);
+                await opencvHandler.initialize();
+                
+                updateStatus('Starting hand tracking...', 'info');
+                opencvHandler.startProcessing();
+                isTracking = true;
+                
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                
+                updateStatus('Hand tracking active - move your hands in front of the camera', 'success');
+                
+            } catch (error) {
+                updateStatus('Tracking error: ' + error.message, 'error');
+                logDebug('Tracking error: ' + error.message);
+            }
+        }
+        
+        function stopTracking() {
+            if (opencvHandler) {
+                opencvHandler.stopProcessing();
+                isTracking = false;
+                updateStatus('Hand tracking stopped', 'info');
+                
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+            }
+        }
+        
+        // Auto-start camera when page loads
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                if (openCvReady) {
+                    startCamera();
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html> 

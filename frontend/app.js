@@ -22,8 +22,8 @@ class InterludeApp {
         this.isAudioStreaming = false;
         this.audioChunks = [];
         
-        // MediaPipe Holistic for ASL recognition
-        this.holistic = null;
+        // OpenCV ASL Handler (replaces MediaPipe Holistic)
+        this.opencvHandler = null;
         this.localCanvas = null;
         this.localCanvasCtx = null;
         
@@ -70,7 +70,7 @@ class InterludeApp {
         this.roleHearingRadio = document.getElementById('roleHearing');
         this.roleDeafRadio = document.getElementById('roleDeaf');
         
-        // MediaPipe canvas elements
+        // OpenCV canvas elements
         this.localCanvas = document.getElementById('localCanvas');
         this.localCanvasCtx = this.localCanvas.getContext('2d');
         
@@ -82,6 +82,9 @@ class InterludeApp {
         this.themeToggle = document.getElementById('themeToggle');
         this.usernameInput = document.getElementById('usernameInput');
         this.videoQualitySelect = document.getElementById('videoQuality');
+        
+        // Initialize OpenCV ASL Handler
+        this.initializeOpenCVHandler();
         this.defaultMuteToggle = document.getElementById('defaultMute');
         this.defaultVideoOffToggle = document.getElementById('defaultVideoOff');
 
@@ -817,145 +820,91 @@ class InterludeApp {
         }
     }
 
-    // --- ASL Recognition Integration with MediaPipe Holistic ---
+    // --- OpenCV ASL Handler Initialization ---
+    initializeOpenCVHandler() {
+        try {
+            console.log('🔧 Initializing OpenCV ASL Handler...');
+            
+            // Check if OpenCV is already loaded
+            if (typeof OpenCVASLHandler !== 'undefined') {
+                console.log('✅ OpenCVASLHandler already available');
+                this.opencvHandler = new OpenCVASLHandler(this);
+                return;
+            }
+            
+            // Load the OpenCV ASL Handler script
+            const script = document.createElement('script');
+            script.src = 'js/asl/opencv-handler.js';
+            script.onload = () => {
+                console.log('✅ OpenCV ASL Handler script loaded');
+                if (typeof OpenCVASLHandler !== 'undefined') {
+                    this.opencvHandler = new OpenCVASLHandler(this);
+                    console.log('✅ OpenCV ASL Handler created');
+                } else {
+                    console.error('❌ OpenCVASLHandler not defined after script load');
+                }
+            };
+            script.onerror = (error) => {
+                console.error('❌ Failed to load OpenCV ASL Handler script:', error);
+            };
+            document.head.appendChild(script);
+        } catch (error) {
+            console.error('❌ Error initializing OpenCV ASL Handler:', error);
+        }
+    }
+    
+    // --- OpenCV Ready Callback ---
+    onOpenCvReady() {
+        console.log('🎉 OpenCV.js ready callback triggered');
+        
+        // Initialize the handler if not already done
+        if (!this.opencvHandler && typeof OpenCVASLHandler !== 'undefined') {
+            console.log('🔧 Creating OpenCV ASL Handler...');
+            this.opencvHandler = new OpenCVASLHandler(this);
+        }
+        
+        if (this.opencvHandler) {
+            this.opencvHandler.initialize().then(() => {
+                console.log('✅ OpenCV ASL Handler initialized successfully');
+            }).catch((error) => {
+                console.error('❌ Failed to initialize OpenCV ASL Handler:', error);
+            });
+        } else {
+            console.error('❌ OpenCV ASL Handler not available');
+        }
+    }
+    
+    // --- ASL Recognition Integration with OpenCV.js ---
     startAslRecognition() {
         try {
-            console.log('🚀 Starting ASL recognition with enhanced debugging...');
+            console.log('🚀 Starting OpenCV ASL recognition...');
+            console.log('📊 Current state:', {
+                opencvHandler: !!this.opencvHandler,
+                localVideo: !!this.localVideo,
+                localCanvas: !!this.localCanvas,
+                localCanvasCtx: !!this.localCanvasCtx
+            });
             
-            // Initialize MediaPipe Holistic
-            this.holistic = new window.Holistic({
-                locateFile: (file) => {
-                    return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`;
-                }
-            });
-
-            // Set up results callback with enhanced debugging
-            this.holistic.onResults = (results) => {
-                console.log('🎉 MEDIAPIPE ONRESULTS CALLED!', {
-                    hasPose: !!results.poseLandmarks,
-                    hasLeftHand: !!results.leftHandLandmarks,
-                    hasRightHand: !!results.rightHandLandmarks,
-                    poseCount: results.poseLandmarks?.length || 0,
-                    leftHandCount: results.leftHandLandmarks?.length || 0,
-                    rightHandCount: results.rightHandLandmarks?.length || 0,
-                    timestamp: Date.now()
-                });
-                
-                // Save current canvas settings
-                this.localCanvasCtx.save();
-
-                // Clear the canvas
-                this.localCanvasCtx.clearRect(0, 0, this.localCanvas.width, this.localCanvas.height);
-                
-                // Use MediaPipe drawing utilities if available
-                if (window.drawConnectors && window.drawLandmarks) {
-                    // Draw pose
-                    if (results.poseLandmarks) {
-                        drawConnectors(this.localCanvasCtx, results.poseLandmarks, POSE_CONNECTIONS,
-                                      {color: '#00FF00', lineWidth: 4});
-                        drawLandmarks(this.localCanvasCtx, results.poseLandmarks,
-                                     {color: '#FF0000', lineWidth: 2, radius: 5});
-                        console.log('🔴 Pose landmarks drawn with MediaPipe utilities');
-                    }
-                    
-                    // Draw hands
-                    if (results.rightHandLandmarks) {
-                        drawConnectors(this.localCanvasCtx, results.rightHandLandmarks, HAND_CONNECTIONS,
-                                      {color: '#00FF00', lineWidth: 5});
-                        drawLandmarks(this.localCanvasCtx, results.rightHandLandmarks,
-                                     {color: '#0000FF', lineWidth: 2, radius: 5});
-                        console.log('🔵 Right hand landmarks drawn with MediaPipe utilities');
-                    }
-                    
-                    if (results.leftHandLandmarks) {
-                        drawConnectors(this.localCanvasCtx, results.leftHandLandmarks, HAND_CONNECTIONS,
-                                      {color: '#FF0000', lineWidth: 5});
-                        drawLandmarks(this.localCanvasCtx, results.leftHandLandmarks,
-                                     {color: '#00FF00', lineWidth: 2, radius: 5});
-                        console.log('🟢 Left hand landmarks drawn with MediaPipe utilities');
-                    }
-                } else {
-                    // Fallback to custom drawing
-                    if (results.poseLandmarks) {
-                        this.drawLandmarks(this.localCanvasCtx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2, radius: 3});
-                        console.log('🔴 Pose landmarks drawn with custom method');
-                    }
-                    
-                    if (results.leftHandLandmarks) {
-                        this.drawLandmarks(this.localCanvasCtx, results.leftHandLandmarks, {color: '#00FF00', lineWidth: 2, radius: 3});
-                        console.log('🟢 Left hand landmarks drawn with custom method');
-                    }
-                    
-                    if (results.rightHandLandmarks) {
-                        this.drawLandmarks(this.localCanvasCtx, results.rightHandLandmarks, {color: '#0000FF', lineWidth: 2, radius: 3});
-                        console.log('🔵 Right hand landmarks drawn with custom method');
-                    }
-                }
-
-                // Restore canvas settings
-                this.localCanvasCtx.restore();
-
-                // Enhanced console log to verify keypoints are being captured
-                console.log('📊 MediaPipe Results Summary:', {
-                    pose: results.poseLandmarks ? results.poseLandmarks.length : 0,
-                    leftHand: results.leftHandLandmarks ? results.leftHandLandmarks.length : 0,
-                    rightHand: results.rightHandLandmarks ? results.rightHandLandmarks.length : 0,
-                    totalLandmarks: (results.poseLandmarks?.length || 0) + 
-                                   (results.leftHandLandmarks?.length || 0) + 
-                                   (results.rightHandLandmarks?.length || 0)
-                });
-
-                // Prepare and stream keypoint data to backend
-                const keypointData = this.prepareKeypointData(results);
-                if (this.socket && this.socket.connected && keypointData) {
-                    this.socket.emit('asl_keypoints', keypointData);
-                    console.log('📡 Sending ASL keypoints to backend:', keypointData);
-                }
-
-                // Store keypoint data if recording for training
-                if (this.isRecording && keypointData) {
-                    this.currentRecording.push(keypointData);
-                    this.recordingFrameCount++;
-                    this.frameCount.textContent = `Frames: ${this.recordingFrameCount}`;
-                }
-            };
-
-            // Enhanced MediaPipe options with CORRECT Holistic parameters only
-            this.holistic.setOptions({
-                modelComplexity: 1,                    // Balance between speed and accuracy
-                smoothLandmarks: true,                 // Reduce jitter in hand movements
-                enableSegmentation: false,             // Not needed for ASL recognition
-                smoothSegmentation: false,
-                refineFaceLandmarks: false,            // Focus on hands and pose
-                minDetectionConfidence: 0.5,           // Standard threshold for detection
-                minTrackingConfidence: 0.5             // Standard threshold for tracking
-            });
-
-            console.log('✅ MediaPipe options set with correct Holistic parameters');
-
-            // Fix canvas dimensions to match video
-            const updateCanvasSize = () => {
-                if (this.localVideo.videoWidth && this.localVideo.videoHeight) {
-                    this.localCanvas.width = this.localVideo.videoWidth;
-                    this.localCanvas.height = this.localVideo.videoHeight;
-                    console.log(`🎨 Canvas resized to: ${this.localCanvas.width}x${this.localCanvas.height}`);
-                }
-            };
-
-            // Call it immediately and when video metadata loads
-            updateCanvasSize();
-            this.localVideo.addEventListener('loadedmetadata', updateCanvasSize);
-
-            // Start processing video frames after MediaPipe initialization
-            setTimeout(() => {
-                this.processVideoFrames();
-            }, 1000);
+            if (!this.opencvHandler) {
+                console.error('❌ OpenCV ASL Handler not initialized');
+                throw new Error('OpenCV ASL Handler not initialized');
+            }
+            
+            if (!this.localVideo || !this.localCanvas || !this.localCanvasCtx) {
+                console.error('❌ Video or canvas elements not available');
+                throw new Error('Video or canvas elements not available');
+            }
+            
+            console.log('✅ All components available, starting processing...');
+            
+            // Start OpenCV processing
+            this.opencvHandler.startProcessing();
             
             this.aslToSpeechStatus.textContent = 'Processing ASL...';
-            this.updateStatus('ASL recognition started with debugging', 'success');
+            this.updateStatus('OpenCV ASL recognition started', 'success');
             
         } catch (error) {
-            console.error('❌ Error starting ASL recognition:', error);
+            console.error('Error starting ASL recognition:', error);
             this.updateStatus(`Failed to start ASL recognition: ${error.message}`, 'error');
             this.aslToSpeechStatus.textContent = 'ASL recognition error';
         }
@@ -963,9 +912,8 @@ class InterludeApp {
 
     stopAslRecognition() {
         try {
-            if (this.holistic) {
-                this.holistic.close();
-                this.holistic = null;
+            if (this.opencvHandler) {
+                this.opencvHandler.stopProcessing();
             }
             
             // Clear the canvas
@@ -982,68 +930,11 @@ class InterludeApp {
         }
     }
 
-        // Enhanced video frame processing with debugging and reduced FPS for testing
+        // OpenCV video frame processing
         processVideoFrames() {
-            let frameCount = 0;
-            let lastFrameTime = 0;
-            const targetFPS = 5; // REDUCED: Lower FPS for debugging (was 15)
-            const frameInterval = 1000 / targetFPS;
-            
-            console.log(`🔧 Starting video frame processing with ${targetFPS} FPS for debugging`);
-            
-            const sendFrame = async () => {
-                const currentTime = performance.now();
-                
-                if (this.holistic && this.localVideo.readyState >= 2) {
-                    try {
-                        // Frame rate control for optimal ASL processing
-                        if (currentTime - lastFrameTime >= frameInterval) {
-                            // TEMPORARILY REMOVED: video quality check for debugging
-                            // const videoQuality = this.assessVideoQuality();
-                            // if (videoQuality.isGoodForASL) {
-                            
-                            // Always process frames for debugging
-                            console.log(`📹 Sending frame #${frameCount + 1} to MediaPipe...`);
-                            await this.holistic.send({image: this.localVideo});
-                            lastFrameTime = currentTime;
-                            frameCount++;
-                            
-                            // Log processing stats every 2 seconds (more frequent for debugging)
-                            if (frameCount % (targetFPS * 2) === 0) {
-                                console.log(`📊 ASL Processing: ${frameCount} frames processed. FPS: ${targetFPS}`);
-                                
-                                // Log video element status
-                                console.log('📹 Video element status:', {
-                                    readyState: this.localVideo.readyState,
-                                    videoWidth: this.localVideo.videoWidth,
-                                    videoHeight: this.localVideo.videoHeight,
-                                    paused: this.localVideo.paused,
-                                    ended: this.localVideo.ended
-                                });
-                            }
-                            // } // End of temporarily removed quality check
-                        }
-                    } catch (error) {
-                        console.error('❌ Error sending frame to MediaPipe:', error);
-                    }
-                } else {
-                    if (!this.holistic) {
-                        console.log('⚠️ MediaPipe holistic not available');
-                    }
-                    if (this.localVideo.readyState < 2) {
-                        console.log('⚠️ Video not ready, readyState:', this.localVideo.readyState);
-                    }
-                }
-                
-                // Continue processing frames using requestAnimationFrame (manual camera implementation)
-                if (this.holistic) {
-                    requestAnimationFrame(sendFrame);
-                }
-            };
-            
-            // Start the enhanced camera-like frame processing
-            console.log('🚀 Starting enhanced MediaPipe camera processing with debugging...');
-            sendFrame();
+            console.log('🔧 OpenCV frame processing is handled by the OpenCV ASL Handler');
+            // Frame processing is now handled by the OpenCV ASL Handler
+            // This method is kept for compatibility but delegates to the handler
         }
 
         // Assess video quality for ASL recognition suitability

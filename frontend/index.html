@@ -8,19 +8,34 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <!-- MediaPipe Holistic for ASL keypoint detection -->
-    <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-    <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
-    <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-    <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
     
-    <!-- Make MediaPipe drawing utilities globally available -->
+    <!-- OpenCV.js for ASL keypoint detection -->
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
+    
+    <!-- OpenCV.js initialization -->
     <script>
-        // Make drawing utilities globally available
-        window.drawConnectors = window.drawConnectors || drawConnectors;
-        window.drawLandmarks = window.drawLandmarks || drawLandmarks;
-        window.POSE_CONNECTIONS = window.POSE_CONNECTIONS || POSE_CONNECTIONS;
-        window.HAND_CONNECTIONS = window.HAND_CONNECTIONS || HAND_CONNECTIONS;
+        let openCvReady = false;
+        
+        function onOpenCvReady() {
+            console.log('✅ OpenCV.js loaded successfully');
+            openCvReady = true;
+            
+            // Notify the main app that OpenCV is ready
+            if (window.interludeApp) {
+                window.interludeApp.onOpenCvReady();
+            }
+        }
+        
+        // Fallback if OpenCV fails to load
+        setTimeout(() => {
+            if (!openCvReady) {
+                console.warn('⚠️ OpenCV.js failed to load, falling back to basic functionality');
+                openCvReady = true;
+                if (window.interludeApp) {
+                    window.interludeApp.onOpenCvReady();
+                }
+            }
+        }, 10000); // 10 second timeout
     </script>
 </head>
 <body>
