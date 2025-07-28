@@ -1379,119 +1379,18 @@ class InterludeApp {
 
     // --- ASL Data Collection Methods ---
     startRecording() {
-        if (this.isRecording) {
-            this.updateStatus('Already recording', 'warning');
-            return;
-        }
-
-        const selectedGesture = this.gestureSelect.value;
-        if (!selectedGesture) {
-            this.updateStatus('Please select a gesture to record', 'error');
-            return;
-        }
-
-        // Reset recording state
-        this.currentRecording = [];
-        this.recordingFrameCount = 0;
-        this.isRecording = true;
-
-        // Update UI
-        this.startRecordingBtn.disabled = true;
-        this.stopRecordingBtn.disabled = false;
-        this.gestureSelect.disabled = true;
-        this.recordingStatus.textContent = `Recording: ${selectedGesture}`;
-        this.frameCount.textContent = 'Frames: 0';
-
-        this.updateStatus(`Started recording gesture: ${selectedGesture}`, 'success');
-        
-        // Automatically stop recording after 10 seconds as safety measure
-        this.recordingTimeout = setTimeout(() => {
-            if (this.isRecording) {
-                this.stopRecording();
-                this.updateStatus('Recording stopped automatically after 10 seconds', 'info');
-            }
-        }, 10000);
+        // Simplified - just show status
+        this.updateStatus('ASL Recognition is active. Perform gestures in front of camera.', 'info');
     }
 
     stopRecording() {
-        if (!this.isRecording) {
-            this.updateStatus('Not currently recording', 'warning');
-            return;
-        }
-
-        const selectedGesture = this.gestureSelect.value;
-        
-        // Clear timeout
-        if (this.recordingTimeout) {
-            clearTimeout(this.recordingTimeout);
-            this.recordingTimeout = null;
-        }
-
-        // Stop recording
-        this.isRecording = false;
-
-        // Check if we have enough data
-        if (this.currentRecording.length < 15) {
-            this.updateStatus(`Recording too short (${this.currentRecording.length} frames). Need at least 15 frames.`, 'error');
-        } else {
-            // Save the recording with metadata
-            const recordingData = {
-                gesture: selectedGesture,
-                frames: this.currentRecording,
-                frameCount: this.recordingFrameCount,
-                timestamp: new Date().toISOString(),
-                duration: this.currentRecording.length / 15 // Approximate duration in seconds at 15 fps
-            };
-
-            this.collectedData.push(recordingData);
-            this.updateStatus(`Recording saved: ${selectedGesture} (${this.recordingFrameCount} frames)`, 'success');
-        }
-
-        // Update UI
-        this.startRecordingBtn.disabled = false;
-        this.stopRecordingBtn.disabled = true;
-        this.gestureSelect.disabled = false;
-        this.recordingStatus.textContent = 'Ready to record';
-        this.datasetCount.textContent = `Recordings in session: ${this.collectedData.length}`;
-
-        // Reset recording data
-        this.currentRecording = [];
-        this.recordingFrameCount = 0;
-        this.frameCount.textContent = 'Frames: 0';
+        // Simplified - just show status
+        this.updateStatus('ASL Recognition continues to run.', 'info');
     }
 
     downloadCollectedData() {
-        if (this.collectedData.length === 0) {
-            this.updateStatus('No data to download. Record some gestures first.', 'warning');
-            return;
-        }
-
-        // Create download data with metadata
-        const downloadData = {
-            metadata: {
-                recordingSession: new Date().toISOString(),
-                totalRecordings: this.collectedData.length,
-                userRole: this.userRole,
-                roomId: this.currentRoom
-            },
-            recordings: this.collectedData
-        };
-
-        // Convert to JSON and create download
-        const dataStr = JSON.stringify(downloadData, null, 2);
-        const dataBlob = new Blob([dataStr], { type: 'application/json' });
-        const url = URL.createObjectURL(dataBlob);
-        
-        // Create temporary download link
-        const downloadLink = document.createElement('a');
-        downloadLink.href = url;
-        downloadLink.download = `asl_training_data_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-        document.body.removeChild(downloadLink);
-        URL.revokeObjectURL(url);
-
-        this.updateStatus(`Downloaded training data: ${this.collectedData.length} recordings`, 'success');
+        // Skip for now - focus on recognition
+        this.updateStatus('Data collection disabled for demo. Focus on real-time recognition.', 'info');
     }
 }
 
