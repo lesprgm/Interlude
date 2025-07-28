@@ -13,6 +13,15 @@
     <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
     <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
     <script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
+    
+    <!-- Make MediaPipe drawing utilities globally available -->
+    <script>
+        // Make drawing utilities globally available
+        window.drawConnectors = window.drawConnectors || drawConnectors;
+        window.drawLandmarks = window.drawLandmarks || drawLandmarks;
+        window.POSE_CONNECTIONS = window.POSE_CONNECTIONS || POSE_CONNECTIONS;
+        window.HAND_CONNECTIONS = window.HAND_CONNECTIONS || HAND_CONNECTIONS;
+    </script>
 </head>
 <body>
     <div class="app-container">
