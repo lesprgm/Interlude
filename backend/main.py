@@ -389,8 +389,9 @@ async def synthesize_speech_elevenlabs(text_to_synthesize: str) -> bytes:
         return b''
 
     # You can find voice_id in Eleven Labs dashboard -> VoiceLab -> Add Voice -> Use Pre-made Voice
-    # Example: 'Rachel' voice_id
-    VOICE_ID = "21m00Tcm4TlvDq8ikWAM" # Replace with your preferred voice ID
+    
+    
+    VOICE_ID = "Aa6nEBJJMKJwJkCx8VU2" # Quentin's Voice ID
 
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
     headers = {
