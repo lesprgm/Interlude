@@ -105,7 +105,7 @@ class ASLRecognizer:
         """Load the trained LSTM model for ASL recognition."""
         import pickle
         
-        model_path = 'asl_recognition_model'
+        model_path = 'asl_recognition_model.keras'
         label_encoder_path = 'asl_recognition_model_label_encoder.pkl'
         
         # Check if model files exist

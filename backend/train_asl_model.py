@@ -406,8 +406,9 @@ def main():
         trainer.evaluate_model(model, test_data, processor.label_encoder)
         
         # Save final model
-        model.save(args.output_model)
-        logger.info(f"Model saved to {args.output_model}")
+        model_path = f"{args.output_model}.keras"
+        model.save(model_path)
+        logger.info(f"Model saved to {model_path}")
         
         # Save label encoder
         import pickle
