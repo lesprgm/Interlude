@@ -1575,4 +1575,127 @@ body {
 .dark-theme .recording-info span,
 .dark-theme .dataset-info span {
   color: var(--color-gray-400);
+}
+
+/* ASL Controls Styles */
+.asl-controls {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  background: var(--color-gray-50);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-gray-200);
+}
+
+.control-group {
+  margin-bottom: var(--space-4);
+}
+
+.control-group:last-child {
+  margin-bottom: 0;
+}
+
+.control-group label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: var(--space-2);
+  color: var(--color-gray-700);
+}
+
+.control-group select {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-gray-300);
+  border-radius: var(--radius-md);
+  background: var(--color-white);
+  font-size: var(--font-size-sm);
+}
+
+.control-group select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+
+.control-group .btn {
+  padding: var(--space-2) var(--space-4);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-base);
+  margin-right: var(--space-2);
+}
+
+.control-group .btn:last-child {
+  margin-right: 0;
+}
+
+.btn-primary {
+  background: var(--color-primary);
+  color: var(--color-white);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.btn-secondary {
+  background: var(--color-gray-500);
+  color: var(--color-white);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-gray-600);
+}
+
+.btn-success {
+  background: var(--color-success);
+  color: var(--color-white);
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #059669;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.status-group {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-600);
+}
+
+.status-group div {
+  text-align: center;
+}
+
+/* Dark theme for ASL controls */
+.dark-theme .asl-controls {
+  background: var(--color-gray-800);
+  border-color: var(--color-gray-700);
+}
+
+.dark-theme .control-group label {
+  color: var(--color-gray-300);
+}
+
+.dark-theme .control-group select {
+  background: var(--color-gray-700);
+  border-color: var(--color-gray-600);
+  color: var(--color-gray-100);
+}
+
+.dark-theme .control-group select:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+}
+
+.dark-theme .status-group {
+  color: var(--color-gray-400);
 } 
