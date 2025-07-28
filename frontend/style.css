@@ -1388,3 +1388,191 @@ body {
     display: none !important;
   }
 } 
+
+/* Dark theme styles */
+.dark-theme .toggle-slider::before {
+  background-color: var(--color-gray-700);
+}
+
+.dark-theme .toggle-slider {
+  background-color: var(--color-gray-600);
+}
+
+.dark-theme input:checked + .toggle-slider {
+  background-color: var(--color-primary);
+}
+
+/* ASL Data Collection Styles */
+.asl-data-collection {
+  background: var(--color-white);
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  margin-top: var(--space-6);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.collection-header {
+  text-align: center;
+  margin-bottom: var(--space-6);
+}
+
+.collection-header h3 {
+  color: var(--color-gray-900);
+  margin-bottom: var(--space-2);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.collection-header p {
+  color: var(--color-gray-600);
+  font-size: 0.875rem;
+}
+
+.collection-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.gesture-selection {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.gesture-selection label {
+  font-weight: 500;
+  color: var(--color-gray-700);
+  min-width: 120px;
+}
+
+.gesture-selection select {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-gray-300);
+  border-radius: var(--radius-md);
+  background: var(--color-white);
+  color: var(--color-gray-900);
+  font-size: 0.875rem;
+}
+
+.recording-controls {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.collection-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: none;
+  border-radius: var(--radius-md);
+  font-weight: 500;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.collection-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.start-recording {
+  background: var(--color-success);
+  color: var(--color-white);
+}
+
+.start-recording:hover:not(:disabled) {
+  background: #059669;
+}
+
+.stop-recording {
+  background: var(--color-danger);
+  color: var(--color-white);
+}
+
+.stop-recording:hover:not(:disabled) {
+  background: #dc2626;
+}
+
+.download-data {
+  background: var(--color-primary);
+  color: var(--color-white);
+}
+
+.download-data:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.collection-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-gray-200);
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.recording-info,
+.dataset-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.recording-info span,
+.dataset-info span {
+  font-size: 0.75rem;
+  color: var(--color-gray-600);
+  font-weight: 500;
+}
+
+.recording-info span:first-child,
+.dataset-info span:first-child {
+  color: var(--color-gray-900);
+}
+
+/* Dark theme for ASL Data Collection */
+.dark-theme .asl-data-collection {
+  background: var(--color-gray-800);
+  border-color: var(--color-gray-700);
+}
+
+.dark-theme .collection-header h3 {
+  color: var(--color-white);
+}
+
+.dark-theme .collection-header p {
+  color: var(--color-gray-300);
+}
+
+.dark-theme .gesture-selection label {
+  color: var(--color-gray-300);
+}
+
+.dark-theme .gesture-selection select {
+  background: var(--color-gray-700);
+  border-color: var(--color-gray-600);
+  color: var(--color-white);
+}
+
+.dark-theme .collection-status {
+  border-top-color: var(--color-gray-700);
+}
+
+.dark-theme .recording-info span:first-child,
+.dark-theme .dataset-info span:first-child {
+  color: var(--color-white);
+}
+
+.dark-theme .recording-info span,
+.dark-theme .dataset-info span {
+  color: var(--color-gray-400);
+} 

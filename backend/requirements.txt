@@ -2,3 +2,9 @@ fastapi
 uvicorn
 python-socketio
 google-cloud-speech
+httpx
+tensorflow>=2.10.0
+scikit-learn>=1.1.0
+numpy>=1.21.0
+matplotlib>=3.5.0
+seaborn>=0.11.0

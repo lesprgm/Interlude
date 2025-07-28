@@ -138,6 +138,58 @@
                     </div>
                 </div>
             </div>
+
+            <!-- ASL Data Collection Panel (for deaf users) -->
+            <div id="aslDataCollection" class="asl-data-collection" style="display: none;">
+                <div class="collection-header">
+                    <h3>ASL Data Collection</h3>
+                    <p>Help train the ASL recognition model by recording gestures</p>
+                </div>
+                <div class="collection-controls">
+                    <div class="gesture-selection">
+                        <label for="gestureSelect">Select Gesture:</label>
+                        <select id="gestureSelect">
+                            <option value="HELLO">Hello</option>
+                            <option value="YES">Yes</option>
+                            <option value="NO">No</option>
+                            <option value="THANK_YOU">Thank You</option>
+                            <option value="GOODBYE">Goodbye</option>
+                        </select>
+                    </div>
+                    <div class="recording-controls">
+                        <button id="startRecordingBtn" class="collection-btn start-recording">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="3"/>
+                                <path d="M12 1v6m0 6v6"/>
+                            </svg>
+                            Start Recording
+                        </button>
+                        <button id="stopRecordingBtn" class="collection-btn stop-recording" disabled>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="6" y="6" width="12" height="12"/>
+                            </svg>
+                            Stop Recording
+                        </button>
+                        <button id="downloadDataBtn" class="collection-btn download-data">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7,10 12,15 17,10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                            Download Data
+                        </button>
+                    </div>
+                </div>
+                <div class="collection-status">
+                    <div class="recording-info">
+                        <span id="recordingStatus">Ready to record</span>
+                        <span id="frameCount">Frames: 0</span>
+                    </div>
+                    <div class="dataset-info">
+                        <span id="datasetCount">Recordings in session: 0</span>
+                    </div>
+                </div>
+            </div>
         </main>
 
         <!-- Control Panel -->
