@@ -481,26 +481,34 @@ async def synthesize_speech_elevenlabs(text_to_synthesize: str) -> bytes:
 # --- ASL Keypoint Event Handler ---
 @sio.on('asl_keypoints')
 async def asl_keypoints(sid, keypoint_data):
+    logger.info(f"🔍 DEBUG: Received ASL keypoints from {sid}")
     session = await sio.get_session(sid)
     user_role = session.get('user_role')
+    logger.info(f"🔍 DEBUG: User role is {user_role}")
 
     if user_role != 'deaf':
-        # Silently ignore if not a deaf user, as this is a continuous stream and not an error
+        logger.info(f"🔍 DEBUG: Ignoring - user is {user_role}, not deaf")
         return 
 
+    logger.info(f"🔍 DEBUG: Processing ASL keypoints for deaf user")
+    
     # Initialize buffer if not exists
     if sid not in keypoint_buffers:
         keypoint_buffers[sid] = []
+        logger.info(f"🔍 DEBUG: Created new keypoint buffer for {sid}")
 
     # Add current frame's keypoints to the buffer
     keypoint_buffers[sid].append(keypoint_data)
+    logger.info(f"🔍 DEBUG: Added keypoint to buffer. Buffer size: {len(keypoint_buffers[sid])}")
 
     # Keep the buffer limited to the sequence length required by the model
     if len(keypoint_buffers[sid]) > asl_recognizer.sequence_length:
         keypoint_buffers[sid].pop(0) # Remove the oldest frame
+        logger.info(f"🔍 DEBUG: Trimmed buffer to sequence length")
 
     # Only attempt prediction if we have enough frames for a full sequence
     if len(keypoint_buffers[sid]) < asl_recognizer.sequence_length:
+        logger.info(f"🔍 DEBUG: Not enough frames ({len(keypoint_buffers[sid])}) for prediction, need {asl_recognizer.sequence_length}")
         # Not enough data for a full sign, send UNKNOWN or CLEAR if previous was a sign
         last_prediction_info = session.get('last_asl_prediction', {'label': None, 'confidence': 0.0})
         if last_prediction_info['label'] not in ['UNKNOWN', 'CLEAR', None]:
@@ -512,16 +520,21 @@ async def asl_keypoints(sid, keypoint_data):
                     client_session = await sio.get_session(client_sid)
                     if client_session.get('user_role') == 'hearing' and client_sid != sid:
                         await sio.emit('asl_prediction', {'sign': 'CLEAR', 'confidence': 0.0}, room=client_sid)
-                        # Optionally, send a silent audio chunk or a specific signal to stop TTS playback on frontend
-                        # await sio.emit('synthesized_audio_chunk', b'', room=client_sid)
                         break
             session = await sio.get_session(sid)
             session['last_asl_prediction'] = {'label': 'CLEAR', 'confidence': 0.0}
             await sio.save_session(sid, session)
         return # Exit early if not enough data
 
+    logger.info(f"🔍 DEBUG: Have enough frames, calling model prediction")
+    
     # Now, call the model with the current buffer (sequence of frames)
-    predicted_label, confidence = asl_recognizer.predict(keypoint_buffers[sid])
+    try:
+        predicted_label, confidence = asl_recognizer.predict(keypoint_buffers[sid])
+        logger.info(f"🔍 DEBUG: Model returned: {predicted_label} with confidence {confidence}")
+    except Exception as e:
+        logger.error(f"🔍 DEBUG: Model prediction failed: {e}")
+        return
     
     last_prediction_info = session.get('last_asl_prediction', {'label': None, 'confidence': 0.0})
     
