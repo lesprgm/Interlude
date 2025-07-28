@@ -74,7 +74,7 @@ keypoint_buffers = {}
 class ASLRecognizer:
     def __init__(self):
         # Define the specific ASL signs we want to recognize
-        self.actions = ['HELLO', 'GOODBYE', 'YES', 'NO', 'THANK YOU', 'UNKNOWN'] # Added UNKNOWN for clarity
+        self.actions = ['HELLO', 'GOODBYE', 'YES', 'NO', 'THANK_YOU', 'UNKNOWN'] # Added UNKNOWN for clarity
         self.sequence_length = 30  # Number of frames (keypoint sets) to consider for one sign
         
         # Calculate the number of features per frame based on MediaPipe Holistic output
@@ -83,13 +83,49 @@ class ASLRecognizer:
         # Right Hand: 21 landmarks * 3 (x,y,z) = 63
         self.num_features = 132 + 63 + 63 # Total 258 features per frame
 
-        # Placeholder for a real TensorFlow/Keras LSTM model
+        # Load the real trained model or fall back to dummy
+        self.model = None
+        self.label_encoder = None
+        self.use_real_model = False
+        
         try:
-            self.model = self._build_dummy_model()
-            logger.info("ASLRecognizer dummy model built successfully.")
+            self.model = self._load_trained_model()
+            self.use_real_model = True
+            logger.info("ASLRecognizer: Real trained model loaded successfully.")
         except Exception as e:
-            logger.error(f"Failed to build dummy ASL model: {e}")
-            self.model = None # Ensure model is None if building fails
+            logger.warning(f"Failed to load trained model: {e}. Using dummy model for fallback.")
+            try:
+                self.model = self._build_dummy_model()
+                logger.info("ASLRecognizer: Dummy model built successfully as fallback.")
+            except Exception as e2:
+                logger.error(f"Failed to build dummy ASL model: {e2}")
+                self.model = None
+
+    def _load_trained_model(self):
+        """Load the trained LSTM model for ASL recognition."""
+        import pickle
+        
+        model_path = 'asl_recognition_model'
+        label_encoder_path = 'asl_recognition_model_label_encoder.pkl'
+        
+        # Check if model files exist
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Trained model not found at {model_path}")
+        
+        # Load the trained model
+        model = tf.keras.models.load_model(model_path)
+        
+        # Load the label encoder if available
+        if os.path.exists(label_encoder_path):
+            with open(label_encoder_path, 'rb') as f:
+                self.label_encoder = pickle.load(f)
+            # Update actions list to match trained model
+            self.actions = list(self.label_encoder.classes_) + ['UNKNOWN']
+            logger.info(f"Loaded model with classes: {self.label_encoder.classes_}")
+        else:
+            logger.warning("Label encoder not found. Using default action classes.")
+        
+        return model
 
     def _build_dummy_model(self):
         """Builds a dummy Keras Sequential model with LSTM layers for shape compatibility."""
@@ -144,8 +180,7 @@ class ASLRecognizer:
 
     def predict(self, keypoint_sequence):
         """
-        Simulates ASL sign prediction from a sequence of keypoints.
-        In a real scenario, this would perform inference using the loaded model.
+        Predicts ASL sign from a sequence of keypoints using the trained model or simulation.
         """
         if not self.model:
             return 'MODEL_ERROR', 0.0
@@ -163,29 +198,47 @@ class ASLRecognizer:
         # Reshape for model input: (1, sequence_length, num_features)
         model_input = np.expand_dims(processed_sequence, axis=0)
 
-        # --- Simulate Model Prediction ---
-        # In a real model, you'd do:
-        # predictions = self.model.predict(model_input)[0]
-        # predicted_index = np.argmax(predictions)
-        # confidence = predictions[predicted_index]
-        # predicted_label = self.actions[predicted_index]
-
-        # For simulation, generate random probabilities
+        if self.use_real_model and self.label_encoder is not None:
+            # --- REAL MODEL PREDICTION ---
+            try:
+                predictions = self.model.predict(model_input, verbose=0)[0]  # Get predictions for the single sample
+                predicted_index = np.argmax(predictions)
+                confidence = float(predictions[predicted_index])
+                
+                # Map index back to class label using label encoder
+                if predicted_index < len(self.label_encoder.classes_):
+                    predicted_label = self.label_encoder.classes_[predicted_index]
+                else:
+                    predicted_label = 'UNKNOWN'
+                
+                # Apply confidence thresholding
+                if confidence < 0.6:  # Adjust threshold as needed based on model performance
+                    predicted_label = 'UNKNOWN'
+                    confidence = 0.0
+                
+                logger.info(f"Real model prediction: {predicted_label} with confidence {confidence:.2f}")
+                return predicted_label, confidence
+                
+            except Exception as e:
+                logger.error(f"Error during real model prediction: {e}. Falling back to dummy prediction.")
+                # Fall through to dummy prediction
+        
+        # --- DUMMY MODEL PREDICTION (Fallback or when real model not available) ---
+        # Simulate Model Prediction for fallback
         simulated_predictions = np.random.rand(len(self.actions))
         simulated_predictions = simulated_predictions / simulated_predictions.sum() # Normalize to sum to 1
 
         predicted_index = np.argmax(simulated_predictions)
         predicted_label = self.actions[predicted_index]
-        confidence = simulated_predictions[predicted_index]
+        confidence = float(simulated_predictions[predicted_index])
 
         # Simulate 'UNKNOWN' more often if confidence is low, or based on random chance
         if confidence < 0.6 or np.random.rand() < 0.3: # 30% chance of 'UNKNOWN' or if confidence is low
             predicted_label = 'UNKNOWN'
             confidence = 0.0 # Set confidence to 0 for UNKNOWN
 
-        logger.info(f"Simulated prediction: {predicted_label} with confidence {confidence:.2f}")
-
-        return predicted_label, float(confidence) # Return confidence as a standard float
+        logger.info(f"Dummy prediction: {predicted_label} with confidence {confidence:.2f}")
+        return predicted_label, confidence
 
 # Initialize the ASL Recognizer
 asl_recognizer = ASLRecognizer()
