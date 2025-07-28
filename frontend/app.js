@@ -32,6 +32,12 @@ class InterludeApp {
         this.audioQueue = [];
         this.isPlayingAudio = false;
         
+        // ASL Data Collection for training
+        this.isRecording = false;
+        this.currentRecording = [];
+        this.collectedData = [];
+        this.recordingFrameCount = 0;
+        
         // WebRTC Configuration with STUN servers
         this.rtcConfiguration = {
             iceServers: [
@@ -79,6 +85,16 @@ class InterludeApp {
         this.defaultMuteToggle = document.getElementById('defaultMute');
         this.defaultVideoOffToggle = document.getElementById('defaultVideoOff');
 
+        // ASL Data Collection elements
+        this.aslDataCollection = document.getElementById('aslDataCollection');
+        this.gestureSelect = document.getElementById('gestureSelect');
+        this.startRecordingBtn = document.getElementById('startRecordingBtn');
+        this.stopRecordingBtn = document.getElementById('stopRecordingBtn');
+        this.downloadDataBtn = document.getElementById('downloadDataBtn');
+        this.recordingStatus = document.getElementById('recordingStatus');
+        this.frameCount = document.getElementById('frameCount');
+        this.datasetCount = document.getElementById('datasetCount');
+
         this.initializeSocket();
         this.bindEventListeners();
         this.checkBrowserCompatibility();
@@ -115,6 +131,11 @@ class InterludeApp {
             if (e.target === this.settingsModal) this.closeSettings();
         });
         this.themeToggle.addEventListener('change', () => this.toggleTheme());
+        
+        // ASL Data Collection event listeners
+        this.startRecordingBtn.addEventListener('click', () => this.startRecording());
+        this.stopRecordingBtn.addEventListener('click', () => this.stopRecording());
+        this.downloadDataBtn.addEventListener('click', () => this.downloadCollectedData());
         
         // Add event listeners for toggle switch labels/sliders to make them clickable
         this.addToggleSwitchListeners();
@@ -279,6 +300,13 @@ class InterludeApp {
         this.currentRoom = roomId;
         this.socket.emit('join_room', { roomId: roomId, userRole: this.userRole });
         this.updateStatus(`Joining room: ${roomId} as ${this.userRole}...`, 'info', true);
+        
+        // Show/hide ASL data collection panel based on role
+        if (this.userRole === 'deaf') {
+            this.aslDataCollection.style.display = 'block';
+        } else {
+            this.aslDataCollection.style.display = 'none';
+        }
         
         // Hide room selection modal
         document.getElementById('roomSelection').style.display = 'none';
@@ -820,6 +848,13 @@ class InterludeApp {
                     this.socket.emit('asl_keypoints', keypointData);
                     console.log('Sending ASL keypoints:', keypointData);
                 }
+
+                // Store keypoint data if recording for training
+                if (this.isRecording && keypointData) {
+                    this.currentRecording.push(keypointData);
+                    this.recordingFrameCount++;
+                    this.frameCount.textContent = `Frames: ${this.recordingFrameCount}`;
+                }
             };
 
             // Enhanced MediaPipe options for improved ASL recognition accuracy
@@ -1340,6 +1375,123 @@ class InterludeApp {
         } else {
             document.body.classList.remove('dark-theme');
         }
+    }
+
+    // --- ASL Data Collection Methods ---
+    startRecording() {
+        if (this.isRecording) {
+            this.updateStatus('Already recording', 'warning');
+            return;
+        }
+
+        const selectedGesture = this.gestureSelect.value;
+        if (!selectedGesture) {
+            this.updateStatus('Please select a gesture to record', 'error');
+            return;
+        }
+
+        // Reset recording state
+        this.currentRecording = [];
+        this.recordingFrameCount = 0;
+        this.isRecording = true;
+
+        // Update UI
+        this.startRecordingBtn.disabled = true;
+        this.stopRecordingBtn.disabled = false;
+        this.gestureSelect.disabled = true;
+        this.recordingStatus.textContent = `Recording: ${selectedGesture}`;
+        this.frameCount.textContent = 'Frames: 0';
+
+        this.updateStatus(`Started recording gesture: ${selectedGesture}`, 'success');
+        
+        // Automatically stop recording after 10 seconds as safety measure
+        this.recordingTimeout = setTimeout(() => {
+            if (this.isRecording) {
+                this.stopRecording();
+                this.updateStatus('Recording stopped automatically after 10 seconds', 'info');
+            }
+        }, 10000);
+    }
+
+    stopRecording() {
+        if (!this.isRecording) {
+            this.updateStatus('Not currently recording', 'warning');
+            return;
+        }
+
+        const selectedGesture = this.gestureSelect.value;
+        
+        // Clear timeout
+        if (this.recordingTimeout) {
+            clearTimeout(this.recordingTimeout);
+            this.recordingTimeout = null;
+        }
+
+        // Stop recording
+        this.isRecording = false;
+
+        // Check if we have enough data
+        if (this.currentRecording.length < 15) {
+            this.updateStatus(`Recording too short (${this.currentRecording.length} frames). Need at least 15 frames.`, 'error');
+        } else {
+            // Save the recording with metadata
+            const recordingData = {
+                gesture: selectedGesture,
+                frames: this.currentRecording,
+                frameCount: this.recordingFrameCount,
+                timestamp: new Date().toISOString(),
+                duration: this.currentRecording.length / 15 // Approximate duration in seconds at 15 fps
+            };
+
+            this.collectedData.push(recordingData);
+            this.updateStatus(`Recording saved: ${selectedGesture} (${this.recordingFrameCount} frames)`, 'success');
+        }
+
+        // Update UI
+        this.startRecordingBtn.disabled = false;
+        this.stopRecordingBtn.disabled = true;
+        this.gestureSelect.disabled = false;
+        this.recordingStatus.textContent = 'Ready to record';
+        this.datasetCount.textContent = `Recordings in session: ${this.collectedData.length}`;
+
+        // Reset recording data
+        this.currentRecording = [];
+        this.recordingFrameCount = 0;
+        this.frameCount.textContent = 'Frames: 0';
+    }
+
+    downloadCollectedData() {
+        if (this.collectedData.length === 0) {
+            this.updateStatus('No data to download. Record some gestures first.', 'warning');
+            return;
+        }
+
+        // Create download data with metadata
+        const downloadData = {
+            metadata: {
+                recordingSession: new Date().toISOString(),
+                totalRecordings: this.collectedData.length,
+                userRole: this.userRole,
+                roomId: this.currentRoom
+            },
+            recordings: this.collectedData
+        };
+
+        // Convert to JSON and create download
+        const dataStr = JSON.stringify(downloadData, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(dataBlob);
+        
+        // Create temporary download link
+        const downloadLink = document.createElement('a');
+        downloadLink.href = url;
+        downloadLink.download = `asl_training_data_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+        URL.revokeObjectURL(url);
+
+        this.updateStatus(`Downloaded training data: ${this.collectedData.length} recordings`, 'success');
     }
 }
 
