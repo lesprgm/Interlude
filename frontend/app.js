@@ -823,11 +823,11 @@ class InterludeApp {
     // --- OpenCV ASL Handler Initialization ---
     initializeOpenCVHandler() {
         try {
-            console.log('🔧 Initializing OpenCV ASL Handler...');
+            console.log('Initializing OpenCV ASL Handler...');
             
             // Check if OpenCV is already loaded
             if (typeof OpenCVASLHandler !== 'undefined') {
-                console.log('✅ OpenCVASLHandler already available');
+                console.log('OpenCVASLHandler already available');
                 this.opencvHandler = new OpenCVASLHandler(this);
                 return;
             }
@@ -836,49 +836,49 @@ class InterludeApp {
             const script = document.createElement('script');
             script.src = 'js/asl/opencv-handler.js';
             script.onload = () => {
-                console.log('✅ OpenCV ASL Handler script loaded');
+                console.log('OpenCV ASL Handler script loaded');
                 if (typeof OpenCVASLHandler !== 'undefined') {
                     this.opencvHandler = new OpenCVASLHandler(this);
-                    console.log('✅ OpenCV ASL Handler created');
+                    console.log('OpenCV ASL Handler created');
                 } else {
-                    console.error('❌ OpenCVASLHandler not defined after script load');
+                    console.error('OpenCVASLHandler not defined after script load');
                 }
             };
             script.onerror = (error) => {
-                console.error('❌ Failed to load OpenCV ASL Handler script:', error);
+                console.error('Failed to load OpenCV ASL Handler script:', error);
             };
             document.head.appendChild(script);
         } catch (error) {
-            console.error('❌ Error initializing OpenCV ASL Handler:', error);
+            console.error('Error initializing OpenCV ASL Handler:', error);
         }
     }
     
     // --- OpenCV Ready Callback ---
     onOpenCvReady() {
-        console.log('🎉 OpenCV.js ready callback triggered');
+        console.log('OpenCV.js ready callback triggered');
         
         // Initialize the handler if not already done
         if (!this.opencvHandler && typeof OpenCVASLHandler !== 'undefined') {
-            console.log('🔧 Creating OpenCV ASL Handler...');
+            console.log('Creating OpenCV ASL Handler...');
             this.opencvHandler = new OpenCVASLHandler(this);
         }
         
         if (this.opencvHandler) {
             this.opencvHandler.initialize().then(() => {
-                console.log('✅ OpenCV ASL Handler initialized successfully');
+                console.log('OpenCV ASL Handler initialized successfully');
             }).catch((error) => {
-                console.error('❌ Failed to initialize OpenCV ASL Handler:', error);
+                console.error('Failed to initialize OpenCV ASL Handler:', error);
             });
         } else {
-            console.error('❌ OpenCV ASL Handler not available');
+            console.error('OpenCV ASL Handler not available');
         }
     }
     
     // --- ASL Recognition Integration with OpenCV.js ---
     startAslRecognition() {
         try {
-            console.log('🚀 Starting OpenCV ASL recognition...');
-            console.log('📊 Current state:', {
+            console.log('Starting OpenCV ASL recognition...');
+            console.log('Current state:', {
                 opencvHandler: !!this.opencvHandler,
                 localVideo: !!this.localVideo,
                 localCanvas: !!this.localCanvas,
@@ -886,16 +886,16 @@ class InterludeApp {
             });
             
             if (!this.opencvHandler) {
-                console.error('❌ OpenCV ASL Handler not initialized');
+                console.error('OpenCV ASL Handler not initialized');
                 throw new Error('OpenCV ASL Handler not initialized');
             }
             
             if (!this.localVideo || !this.localCanvas || !this.localCanvasCtx) {
-                console.error('❌ Video or canvas elements not available');
+                console.error('Video or canvas elements not available');
                 throw new Error('Video or canvas elements not available');
             }
             
-            console.log('✅ All components available, starting processing...');
+            console.log('All components available, starting processing...');
             
             // Start OpenCV processing
             this.opencvHandler.startProcessing();
@@ -932,7 +932,7 @@ class InterludeApp {
 
         // OpenCV video frame processing
         processVideoFrames() {
-            console.log('🔧 OpenCV frame processing is handled by the OpenCV ASL Handler');
+            console.log('OpenCV frame processing is handled by the OpenCV ASL Handler');
             // Frame processing is now handled by the OpenCV ASL Handler
             // This method is kept for compatibility but delegates to the handler
         }
@@ -1394,12 +1394,12 @@ class InterludeApp {
     }
 
     // 🔧 DEBUGGING HELPER FUNCTION - Call this from console
-    debugCameraAndMediaPipe() {
-        console.log('🔍 === CAMERA & MEDIAPIPE DEBUG REPORT ===');
+    debugCameraAndMediaPipe() { 
+        console.log('=== CAMERA & MEDIAPIPE DEBUG REPORT ===');
         
         // Check camera status
         if (this.localVideo) {
-            console.log('📹 Camera Video Element:', {
+            console.log('Camera Video Element:', {
                 readyState: this.localVideo.readyState,
                 videoWidth: this.localVideo.videoWidth,
                 videoHeight: this.localVideo.videoHeight,
@@ -1409,47 +1409,46 @@ class InterludeApp {
                 currentTime: this.localVideo.currentTime
             });
         } else {
-            console.log('❌ Camera video element not found');
+            console.log('Camera video element not found');
         }
         
         // Check MediaPipe status
         if (this.holistic) {
-            console.log('✅ MediaPipe Holistic is initialized');
+            console.log('MediaPipe Holistic is initialized');
             
             // Test if MediaPipe is responding
             try {
-                console.log('🧪 Testing MediaPipe frame processing...');
+                console.log('Testing MediaPipe frame processing...');
                 this.holistic.send({image: this.localVideo}).then(() => {
-                    console.log('✅ MediaPipe frame sent successfully');
                 }).catch((error) => {
-                    console.error('❌ MediaPipe frame send failed:', error);
+                    console.error('MediaPipe frame send failed:', error);
                 });
             } catch (error) {
-                console.error('❌ Error testing MediaPipe:', error);
+                console.error('Error testing MediaPipe:', error);
             }
         } else {
-            console.log('❌ MediaPipe Holistic not initialized');
+            console.log('MediaPipe Holistic not initialized');
         }
         
         // Check socket connection
         if (this.socket) {
-            console.log('📡 Socket Status:', {
+            console.log('Socket Status:', {
                 connected: this.socket.connected,
                 id: this.socket.id
             });
         } else {
-            console.log('❌ Socket not initialized');
+            console.log('Socket not initialized');
         }
         
         // Check canvas
         if (this.localCanvasCtx) {
-            console.log('🎨 Canvas Status:', {
+            console.log('Canvas Status:', {
                 width: this.localCanvas.width,
                 height: this.localCanvas.height,
                 contextType: this.localCanvasCtx.constructor.name
             });
         } else {
-            console.log('❌ Canvas context not available');
+            console.log('Canvas context not available');
         }
         
         console.log('🔍 === END DEBUG REPORT ===');
@@ -1457,7 +1456,7 @@ class InterludeApp {
 
     // 🔧 DEBUGGING HELPER FUNCTION - Call this from console
     debugMediaPipe() {
-        console.log('🔍 === MEDIAPIPE DEBUG INFO ===');
+        console.log('=== MEDIAPIPE DEBUG INFO ===');
         console.log('Holistic initialized:', !!this.holistic);
         console.log('Video ready:', this.localVideo.readyState >= 2);
         console.log('Video dimensions:', {
@@ -1483,55 +1482,55 @@ class InterludeApp {
         if (this.holistic && this.localVideo.readyState >= 2) {
             console.log('📹 Sending test frame...');
             this.holistic.send({image: this.localVideo}).then(() => {
-                console.log('✅ Test frame sent successfully');
+                console.log('Test frame sent successfully');
             }).catch(err => {
-                console.error('❌ Test frame failed:', err);
+                console.error('Test frame failed:', err);
             });
         } else {
-            console.log('❌ Cannot send test frame - holistic or video not ready');
+            console.log('Cannot send test frame - holistic or video not ready');
         }
         
-        console.log('🔍 === END MEDIAPIPE DEBUG ===');
+        console.log('=== END MEDIAPIPE DEBUG ===');
     }
 
     // 🧪 MANUAL TEST FUNCTION - Call this from console to test MediaPipe
     testMediaPipeDetection() {
-        console.log('🧪 === MANUAL MEDIAPIPE TEST ===');
+        console.log('=== MANUAL MEDIAPIPE TEST ===');
         
         if (!this.holistic) {
-            console.log('❌ MediaPipe not initialized. Start ASL recognition first.');
+            console.log('MediaPipe not initialized. Start ASL recognition first.');
             return;
         }
         
         if (!this.localVideo || this.localVideo.readyState < 2) {
-            console.log('❌ Camera not ready. Make sure camera is on and working.');
+            console.log('Camera not ready. Make sure camera is on and working.');
             return;
         }
         
-        console.log('📹 Sending test frame to MediaPipe...');
+        console.log('Sending test frame to MediaPipe...');
         
         // Send a single frame and see what happens
         this.holistic.send({image: this.localVideo})
             .then(() => {
-                console.log('✅ Test frame sent successfully');
-                console.log('👀 Check if you see any landmark detection messages above...');
+                console.log('Test frame sent successfully');
+                console.log('Check if you see any landmark detection messages above...');
             })
             .catch((error) => {
-                console.error('❌ Test frame failed:', error);
+                console.error('Test frame failed:', error);
             });
     }
 
     // 🧪 SIMPLE TEST FUNCTION - Call this from console
     testMediaPipeSimple() {
-        console.log('🧪 === SIMPLE MEDIAPIPE TEST ===');
+        console.log('=== SIMPLE MEDIAPIPE TEST ===');
         
         if (!this.holistic) {
-            console.log('❌ Holistic not initialized');
+            console.log('Holistic not initialized');
             return;
         }
         
         if (!this.localVideo || this.localVideo.readyState < 2) {
-            console.log('❌ Video not ready');
+            console.log('Video not ready');
             return;
         }
         
@@ -1540,11 +1539,11 @@ class InterludeApp {
         // Send a single frame and see if onResults is called
         this.holistic.send({image: this.localVideo})
             .then(() => {
-                console.log('✅ Test frame sent successfully');
-                console.log('👀 Check for 🎉 MEDIAPIPE ONRESULTS CALLED! messages above...');
+                console.log('Test frame sent successfully');
+                console.log('Check for MEDIAPIPE ONRESULTS CALLED! messages above...');
             })
             .catch(err => {
-                console.error('❌ Test frame failed:', err);
+                console.error('Test frame failed:', err);
             });
     }
 }

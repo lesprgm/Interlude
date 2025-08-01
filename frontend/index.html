@@ -17,7 +17,7 @@
         let openCvReady = false;
         
         function onOpenCvReady() {
-            console.log('✅ OpenCV.js loaded successfully');
+            console.log('OpenCV.js loaded successfully');
             openCvReady = true;
             
             // Notify the main app that OpenCV is ready
@@ -29,7 +29,7 @@
         // Fallback if OpenCV fails to load
         setTimeout(() => {
             if (!openCvReady) {
-                console.warn('⚠️ OpenCV.js failed to load, falling back to basic functionality');
+                console.warn('OpenCV.js failed to load, falling back to basic functionality');
                 openCvReady = true;
                 if (window.interludeApp) {
                     window.interludeApp.onOpenCvReady();

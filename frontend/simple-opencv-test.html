@@ -117,7 +117,7 @@
         }
         
         function onOpenCvReady() {
-            log('✅ OpenCV.js loaded successfully');
+            log('OpenCV.js loaded successfully');
             openCvReady = true;
             updateStatus('OpenCV.js ready', 'success');
         }
@@ -148,16 +148,16 @@
         
         function startProcessing() {
             if (!openCvReady) {
-                log('❌ OpenCV.js not ready');
+                log('OpenCV.js not ready');
                 return;
             }
             
             if (!cameraStream) {
-                log('❌ Camera not started');
+                log('Camera not started');
                 return;
             }
             
-            log('🚀 Starting OpenCV processing...');
+            log('Starting OpenCV processing...');
             isProcessing = true;
             document.getElementById('processBtn').disabled = true;
             document.getElementById('stopBtn').disabled = false;
@@ -167,7 +167,7 @@
         }
         
         function stopProcessing() {
-            log('⏹️ Stopping OpenCV processing...');
+            log(' Stopping OpenCV processing...');
             isProcessing = false;
             document.getElementById('processBtn').disabled = false;
             document.getElementById('stopBtn').disabled = true;
@@ -217,10 +217,10 @@
                 mat.delete();
                 gray.delete();
                 
-                log(`✅ Processed frame: ${canvas.width}x${canvas.height}`);
+                log(` Processed frame: ${canvas.width}x${canvas.height}`);
                 
             } catch (error) {
-                log('❌ Error processing frame: ' + error.message);
+                log(' Error processing frame: ' + error.message);
             }
             
             // Continue processing
